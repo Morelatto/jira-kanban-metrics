@@ -1,0 +1,13 @@
+Tasks concluidas / dias uteis
+
+- WIP mensal:
+
+project = DET AND issuetype != Epic AND status WAS IN ("Dev", "Planejamento de testes", "Dev-Wait", "Dev-Done", "STG", "STG-Done", "QA", "Implantação", "Delivery") DURING("2015/09/01","2015/09/30")
+
+- Troughput mensal - Entregas:
+
+project = DET AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('2015/09/01','2015/09/30')
+
+- Throughput diário:
+
+
