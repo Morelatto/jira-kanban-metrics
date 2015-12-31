@@ -1,3 +1,21 @@
+/*
+    jira-kanban-metrics - Small application to extract Kanban metrics from a Jira project
+    Copyright (C) 2015 Fausto Santos <fstsantos@gmail.com>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package main
 
 import (
@@ -14,8 +32,8 @@ import (
 	"encoding/json"
 )
 
-func authenticate(username string, password string) Auth {
-	var authUrl = "https://jira.intranet.uol.com.br/jira/rest/auth/1/session"
+func authenticate(username string, password string, jiraUrl string) Auth {
+	var authUrl = jiraUrl + "/rest/auth/1/session"
 	var jsonStr = []byte(`{"username":"` + username + `", "password":"` + password + `"}`)
 
 	req, err := http.NewRequest("POST", authUrl, bytes.NewBuffer(jsonStr))
@@ -70,8 +88,8 @@ func httpGet(url string, auth Auth, insecure bool) []byte {
 	return body
 }
 
-func searchIssues(jql string, auth Auth) SearchResult {
-	var searchUrl = "https://jira.intranet.uol.com.br/jira/rest/api/2/search?jql=" + url.QueryEscape(jql) + "&expand=changelog"
+func searchIssues(jql string, jiraUrl string, auth Auth) SearchResult {
+	var searchUrl = jiraUrl + "/rest/api/2/search?jql=" + url.QueryEscape(jql) + "&expand=changelog"
 
 	body := httpGet(searchUrl, auth, true)
 
@@ -81,8 +99,8 @@ func searchIssues(jql string, auth Auth) SearchResult {
 	return result
 }
 
-func getIssue(issueId int, auth Auth) Issue {
-	var issueUrl = "https://jira.intranet.uol.com.br/jira/rest/api/2/issue/" + strconv.Itoa(issueId) + "?expand=changelog"
+func getIssue(issueId int, jiraUrl string, auth Auth) Issue {
+	var issueUrl = jiraUrl + "/rest/api/2/issue/" + strconv.Itoa(issueId) + "?expand=changelog"
 
 	body := httpGet(issueUrl, auth, true)
 
@@ -134,7 +152,7 @@ func processCommandLineParameters() CLParameters {
 
 	if len(os.Args) != 6 {
 		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
-		fmt.Printf("example: %v john change123 01/31/2010 04/31/2010 http://jira.intranet/jira\n", os.Args[0])
+		fmt.Printf("example: %v john change123 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -142,6 +160,7 @@ func processCommandLineParameters() CLParameters {
 	parameters.Password = os.Args[2]
 	parameters.StartDate = parseDate(os.Args[3])
 	parameters.EndDate = parseDate(os.Args[4])
+	parameters.JiraUrl = os.Args[5]
 
 	return parameters
 }
@@ -149,7 +168,7 @@ func processCommandLineParameters() CLParameters {
 func main() {
 	var parameters CLParameters = processCommandLineParameters()
 
-	var auth Auth = authenticate(parameters.Login, parameters.Password)
+	var auth Auth = authenticate(parameters.Login, parameters.Password, parameters.JiraUrl)
 
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
@@ -157,14 +176,14 @@ func main() {
 	troughputSearch := fmt.Sprintf("project = DET AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('%v', '%v')", 
 								   startDate, endDate)
 
-	result := searchIssues(troughputSearch, auth)
+	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
 	fmt.Printf("Throughput mensal: %v tasks entregues\n", throughtputMonthly)
 
 	wipSearch := fmt.Sprintf("project = DET AND issuetype != Epic AND status WAS IN ('Dev', 'Planejamento de testes', 'Dev-Wait', 'Dev-Done', 'STG', 'STG-Done', 'QA', 'Implantação', 'Delivery') " + 
 							 "DURING('%v', '%v')", startDate, endDate)
 
-	result = searchIssues(wipSearch, auth)
+	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
 	fmt.Printf("WIP mensal: %v tasks\n", wipMonthly)
 
@@ -235,6 +254,7 @@ type CLParameters struct {
 	Password string
 	StartDate time.Time
 	EndDate time.Time
+	JiraUrl string
 }
 
 type Auth struct {
