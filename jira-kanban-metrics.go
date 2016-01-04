@@ -143,16 +143,16 @@ func stripHours(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
-func round(number float64) float64 {
-	return math.Floor(number + 0.5)
+func round(number float64) int {
+	return int(math.Floor(number + 0.5))
 }
 
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
-	if len(os.Args) != 6 {
-		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
-		fmt.Printf("example: %v john change123 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
+	if len(os.Args) != 8 {
+		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <project> <workDays> <jiraUrl>\n", os.Args[0])
+		fmt.Printf("example: %v john change123 01/31/2010 04/31/2010 DET 21 http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -160,7 +160,9 @@ func processCommandLineParameters() CLParameters {
 	parameters.Password = os.Args[2]
 	parameters.StartDate = parseDate(os.Args[3])
 	parameters.EndDate = parseDate(os.Args[4])
-	parameters.JiraUrl = os.Args[5]
+	parameters.Project = os.Args[5]
+	parameters.WorkDays, _ = strconv.Atoi(os.Args[6])
+	parameters.JiraUrl = os.Args[7]
 
 	return parameters
 }
@@ -173,21 +175,21 @@ func main() {
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
 
-	troughputSearch := fmt.Sprintf("project = DET AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('%v', '%v')", 
-								   startDate, endDate)
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", parameters.Project, startDate, endDate)
+
+	troughputSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('%v', '%v')", 
+								   parameters.Project, startDate, endDate)
 
 	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
-	fmt.Printf("Throughput mensal: %v tasks entregues\n", throughtputMonthly)
 
-	wipSearch := fmt.Sprintf("project = DET AND issuetype != Epic AND status WAS IN ('Dev', 'Planejamento de testes', 'Dev-Wait', 'Dev-Done', 'STG', 'STG-Done', 'QA', 'Implantação', 'Delivery') " + 
-							 "DURING('%v', '%v')", startDate, endDate)
+	wipSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status WAS IN ('Dev', 'Planejamento de testes', 'Dev-Wait', 'Dev-Done', 'STG', 'STG-Done', 'QA', 'Implantação', 'Delivery') " + 
+							 "DURING('%v', '%v')", parameters.Project, startDate, endDate)
 
 	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
-	fmt.Printf("WIP mensal: %v tasks\n", wipMonthly)
 
-	var wipDays float64 = 0
+	var wipDays int = 0
 
 	for _, issue := range result.Issues {
 		var start time.Time
@@ -226,7 +228,7 @@ func main() {
 			continue
 		}
 
-		var weekendDays float64 = 0
+		var weekendDays int = 0
 		dateIndex := start
 		for dateIndex.Before(end) || dateIndex.Equal(end) { 
 			if dateIndex.Weekday() == time.Saturday || dateIndex.Weekday() == time.Sunday {
@@ -235,7 +237,7 @@ func main() {
 			dateIndex = dateIndex.AddDate(0, 0, 1)
 		}
 
-		issueDaysInWip := round((end.Sub(start).Hours() / 24) - weekendDays)
+		issueDaysInWip := round((end.Sub(start).Hours() / 24)) - weekendDays
 
 		// if a task Resolved date overlaps the EndDate parameter, it means that the last day should count as a WIP day
 		if !lastDayResolved {
@@ -243,10 +245,14 @@ func main() {
 		}
 
 		wipDays += issueDaysInWip
-		fmt.Printf("Issue: %v Days on the board: %v Start: %v End: %v\n", issue.Key, issueDaysInWip, start, end)
+		fmt.Printf("Task: %v - Days on the board: %v - Start: %v - End: %v\n", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
 	}
 
-	fmt.Printf("WIP medio: %v\n", wipDays / 22)
+	fmt.Printf("\nThroughput monthly: %v tasks delivered\n", throughtputMonthly)
+	fmt.Printf("Throughput weekly: %v tasks delivered\n", float64(throughtputMonthly) / float64(4))
+	fmt.Printf("Throughput daily: %v tasks delivered\n", float64(throughtputMonthly) / float64(parameters.WorkDays))
+	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
+	fmt.Printf("WIP daily: %v tasks\n", float64(wipDays) / float64(parameters.WorkDays))
 }
 
 type CLParameters struct {
@@ -254,6 +260,8 @@ type CLParameters struct {
 	Password string
 	StartDate time.Time
 	EndDate time.Time
+	Project string
+	WorkDays int
 	JiraUrl string
 }
 
