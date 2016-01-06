@@ -150,9 +150,9 @@ func round(number float64) int {
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
-	if len(os.Args) != 8 {
-		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <project> <workDays> <jiraUrl>\n", os.Args[0])
-		fmt.Printf("example: %v john change123 01/31/2010 04/31/2010 DET 21 http://jira.intranet/jira\nfs", os.Args[0])
+	if len(os.Args) != 7 {
+		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <project> <jiraUrl>\n", os.Args[0])
+		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 DET http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -161,10 +161,37 @@ func processCommandLineParameters() CLParameters {
 	parameters.StartDate = parseDate(os.Args[3])
 	parameters.EndDate = parseDate(os.Args[4])
 	parameters.Project = os.Args[5]
-	parameters.WorkDays, _ = strconv.Atoi(os.Args[6])
-	parameters.JiraUrl = os.Args[7]
+	parameters.JiraUrl = os.Args[6]
 
 	return parameters
+}
+
+func countWeekDays(start time.Time, end time.Time) int {
+		var weekDays int = 0
+
+		dateIndex := start
+		for dateIndex.Before(end) || dateIndex.Equal(end) { 
+			if dateIndex.Weekday() != time.Saturday && dateIndex.Weekday() != time.Sunday {
+				weekDays++
+			}
+			dateIndex = dateIndex.AddDate(0, 0, 1)
+		}
+
+		return weekDays
+}
+
+func countWeekendDays(start time.Time, end time.Time) int {
+		var weekendDays int = 0
+
+		dateIndex := start
+		for dateIndex.Before(end) || dateIndex.Equal(end) { 
+			if dateIndex.Weekday() == time.Saturday || dateIndex.Weekday() == time.Sunday {
+				weekendDays++
+			}
+			dateIndex = dateIndex.AddDate(0, 0, 1)
+		}
+
+		return weekendDays
 }
 
 func main() {
@@ -228,15 +255,7 @@ func main() {
 			continue
 		}
 
-		var weekendDays int = 0
-		dateIndex := start
-		for dateIndex.Before(end) || dateIndex.Equal(end) { 
-			if dateIndex.Weekday() == time.Saturday || dateIndex.Weekday() == time.Sunday {
-				weekendDays++
-			}
-			dateIndex = dateIndex.AddDate(0, 0, 1)
-		}
-
+		weekendDays := countWeekendDays(start, end)
 		issueDaysInWip := round((end.Sub(start).Hours() / 24)) - weekendDays
 
 		// if a task Resolved date overlaps the EndDate parameter, it means that the last day should count as a WIP day
@@ -248,11 +267,14 @@ func main() {
 		fmt.Printf("Task: %v - Days on the board: %v - Start: %v - End: %v\n", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
 	}
 
+	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
+
 	fmt.Printf("\nThroughput monthly: %v tasks delivered\n", throughtputMonthly)
-	fmt.Printf("Throughput weekly: %v tasks delivered\n", float64(throughtputMonthly) / float64(4))
-	fmt.Printf("Throughput daily: %v tasks delivered\n", float64(throughtputMonthly) / float64(parameters.WorkDays))
+	fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
+	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
 	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
-	fmt.Printf("WIP daily: %v tasks\n", float64(wipDays) / float64(parameters.WorkDays))
+	fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
+	fmt.Printf("Cycle time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 }
 
 type CLParameters struct {
@@ -261,7 +283,6 @@ type CLParameters struct {
 	StartDate time.Time
 	EndDate time.Time
 	Project string
-	WorkDays int
 	JiraUrl string
 }
 
