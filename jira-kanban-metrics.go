@@ -274,7 +274,7 @@ func main() {
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
 	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
 	fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
-	fmt.Printf("Cycle time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+	fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 }
 
 type CLParameters struct {
