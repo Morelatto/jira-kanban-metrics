@@ -32,6 +32,23 @@ import (
 	"encoding/json"
 )
 
+func loadBoardCfg() BoardCfg {
+	if _, err := os.Stat("jira-board.cfg"); os.IsNotExist(err) {
+		panic("jira-board.cfg not found")
+	}
+
+	file, _ := os.Open("jira-board.cfg")
+	decoder := json.NewDecoder(file)
+	boardCfg := BoardCfg{}
+	err := decoder.Decode(&boardCfg)
+	
+	if err != nil {
+		fmt.Println("error:", err)
+	}
+
+	return boardCfg
+}
+
 func authenticate(username string, password string, jiraUrl string) Auth {
 	var authUrl = jiraUrl + "/rest/auth/1/session"
 	var jsonStr = []byte(`{"username":"` + username + `", "password":"` + password + `"}`)
@@ -150,9 +167,9 @@ func round(number float64) int {
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
-	if len(os.Args) != 7 {
-		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <project> <jiraUrl>\n", os.Args[0])
-		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 DET http://jira.intranet/jira\nfs", os.Args[0])
+	if len(os.Args) != 6 {
+		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
+		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -160,8 +177,7 @@ func processCommandLineParameters() CLParameters {
 	parameters.Password = os.Args[2]
 	parameters.StartDate = parseDate(os.Args[3])
 	parameters.EndDate = parseDate(os.Args[4])
-	parameters.Project = os.Args[5]
-	parameters.JiraUrl = os.Args[6]
+	parameters.JiraUrl = os.Args[5]
 
 	return parameters
 }
@@ -194,24 +210,39 @@ func countWeekendDays(start time.Time, end time.Time) int {
 		return weekendDays
 }
 
+func formatColumns(columns []string) string {
+	str := ""
+
+	for index, col := range columns {
+		str += "'" + col + "'"
+		if (index < len(columns) - 1) {
+			str += ","
+		}
+	}
+
+	return str
+}
+
 func main() {
 	var parameters CLParameters = processCommandLineParameters()
+
+	boardCfg := loadBoardCfg()
 
 	var auth Auth = authenticate(parameters.Login, parameters.Password, parameters.JiraUrl)
 
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
 
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", parameters.Project, startDate, endDate)
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", boardCfg.Project, startDate, endDate)
 
 	troughputSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('%v', '%v')", 
-								   parameters.Project, startDate, endDate)
+								   boardCfg.Project, startDate, endDate)
 
 	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
 
-	wipSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status WAS IN ('Dev', 'Planejamento de testes', 'Dev-Wait', 'Dev-Done', 'STG', 'STG-Done', 'QA', 'Implantação', 'Delivery') " + 
-							 "DURING('%v', '%v')", parameters.Project, startDate, endDate)
+	wipSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status WAS IN (%v) " + 
+							 "DURING('%v', '%v')", boardCfg.Project, formatColumns(boardCfg.Columns), startDate, endDate)
 
 	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
@@ -282,8 +313,12 @@ type CLParameters struct {
 	Password string
 	StartDate time.Time
 	EndDate time.Time
-	Project string
 	JiraUrl string
+}
+
+type BoardCfg struct {
+	Project string
+	Columns []string
 }
 
 type Auth struct {
