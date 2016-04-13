@@ -24,6 +24,7 @@ import (
 	"time"
 	"math"
 	"bytes"
+	"strings"
 	"strconv"
 	"io/ioutil"
 	"net/http"
@@ -235,8 +236,8 @@ func main() {
 
 	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", boardCfg.Project, startDate, endDate)
 
-	troughputSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status CHANGED TO 'Resolved' DURING('%v', '%v')", 
-								   boardCfg.Project, startDate, endDate)
+	troughputSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status CHANGED TO '%v' DURING('%v', '%v')", 
+								   boardCfg.Project, boardCfg.DoneStatus, startDate, endDate)
 
 	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
@@ -261,16 +262,16 @@ func main() {
 				if item.Field == "status" {
 					statusChangeTime := stripHours(parseJiraTime(history.Created))
 
-					// consider only the first change to DEV, a task should not go back on a kanban board
+					// FIX: consider only the first change to DEV, a task should not go back on a kanban board
 					// the OR operator is to evaluate if a task goes directly from Open to another column different from DEV
-					if (item.Fromstring == "Open" || item.Tostring == "DEV") && start.IsZero() {
+					if (strings.EqualFold(item.Fromstring, boardCfg.StartStatus) || strings.EqualFold(item.Tostring, boardCfg.Columns[0])) && start.IsZero() {
 						start = statusChangeTime
 						
 						if start.Before(parameters.StartDate) {
 							start = parameters.StartDate
 						}
 					
-					} else if item.Tostring == "Resolved" {
+					} else if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) {
 						end = statusChangeTime
 						
 						if end.After(parameters.EndDate) {
@@ -319,6 +320,8 @@ type CLParameters struct {
 type BoardCfg struct {
 	Project string
 	Columns []string
+	StartStatus string
+	DoneStatus string
 }
 
 type Auth struct {
