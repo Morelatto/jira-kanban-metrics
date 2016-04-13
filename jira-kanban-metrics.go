@@ -243,7 +243,7 @@ func main() {
 	throughtputMonthly := result.Total
 
 	wipSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status WAS IN (%v) " + 
-							 "DURING('%v', '%v')", boardCfg.Project, formatColumns(boardCfg.Columns), startDate, endDate)
+							 "DURING('%v', '%v')", boardCfg.Project, formatColumns(boardCfg.WipStatus), startDate, endDate)
 
 	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
@@ -264,7 +264,7 @@ func main() {
 
 					// FIX: consider only the first change to DEV, a task should not go back on a kanban board
 					// the OR operator is to evaluate if a task goes directly from Open to another column different from DEV
-					if (strings.EqualFold(item.Fromstring, boardCfg.StartStatus) || strings.EqualFold(item.Tostring, boardCfg.Columns[0])) && start.IsZero() {
+					if (strings.EqualFold(item.Fromstring, boardCfg.StartStatus) || strings.EqualFold(item.Tostring, boardCfg.WipStatus[0])) && start.IsZero() {
 						start = statusChangeTime
 						
 						if start.Before(parameters.StartDate) {
@@ -319,7 +319,7 @@ type CLParameters struct {
 
 type BoardCfg struct {
 	Project string
-	Columns []string
+	WipStatus []string
 	StartStatus string
 	DoneStatus string
 }
