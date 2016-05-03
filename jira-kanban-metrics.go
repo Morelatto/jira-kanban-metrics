@@ -254,6 +254,7 @@ func main() {
 		var start time.Time
 		var end time.Time = parameters.EndDate
 		var lastDayResolved bool = true
+		var resolved bool = false
 
 		for _, history := range issue.Changelog.Histories {
 			
@@ -273,6 +274,7 @@ func main() {
 					
 					} else if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) {
 						end = statusChangeTime
+						resolved = true
 						
 						if end.After(parameters.EndDate) {
 							end = parameters.EndDate
@@ -296,7 +298,13 @@ func main() {
 		}
 
 		wipDays += issueDaysInWip
-		fmt.Printf("Task: %v - Days on the board: %v - Start: %v - End: %v\n", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
+		fmt.Printf("Task: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
+
+		if resolved {
+			fmt.Printf(" (Done)\n");
+		} else {
+			fmt.Println("")
+		}
 	}
 
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
