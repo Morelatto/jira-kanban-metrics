@@ -33,6 +33,9 @@ import (
 	"encoding/json"
 )
 
+// get password lib
+import "github.com/bgentry/speakeasy"
+
 func loadBoardCfg() BoardCfg {
 	if _, err := os.Stat("jira-board.cfg"); os.IsNotExist(err) {
 		panic("jira-board.cfg not found")
@@ -151,10 +154,16 @@ func parseJiraTime(timeStr string) time.Time {
 	return parsedTime
 }
 
-func formatJiraDate(jiraDate time.Time) string {
+func formatJiraDate(date time.Time) string {
 	const jiraDateFormat = "2006/01/02"
 
-	return jiraDate.Format(jiraDateFormat)
+	return date.Format(jiraDateFormat)
+}
+
+func formatBrDate(date time.Time) string {
+	const brDateFormat = "02/01/2006"
+
+	return date.Format(brDateFormat)
 }
 
 func stripHours(t time.Time) time.Time {
@@ -168,17 +177,16 @@ func round(number float64) int {
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
-	if len(os.Args) != 6 {
-		fmt.Printf("usage: %v <login> <password> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
+	if len(os.Args) != 5 {
+		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
 		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
 
 	parameters.Login = os.Args[1]
-	parameters.Password = os.Args[2]
-	parameters.StartDate = parseDate(os.Args[3])
-	parameters.EndDate = parseDate(os.Args[4])
-	parameters.JiraUrl = os.Args[5]
+	parameters.StartDate = parseDate(os.Args[2])
+	parameters.EndDate = parseDate(os.Args[3])
+	parameters.JiraUrl = os.Args[4]
 
 	return parameters
 }
@@ -229,7 +237,12 @@ func main() {
 
 	boardCfg := loadBoardCfg()
 
-	var auth Auth = authenticate(parameters.Login, parameters.Password, parameters.JiraUrl)
+	password, err := speakeasy.Ask("Password: ")
+	if err != nil {
+		panic(err)
+	}
+
+	var auth Auth = authenticate(parameters.Login, password, parameters.JiraUrl)
 
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
@@ -281,6 +294,8 @@ func main() {
 							lastDayResolved = false
 						}
 					}
+
+					fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
 				}
 			}
 		}
@@ -298,18 +313,18 @@ func main() {
 		}
 
 		wipDays += issueDaysInWip
-		fmt.Printf("Task: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
+		fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
 
 		if resolved {
-			fmt.Printf(" (Done)\n");
+			fmt.Printf(" (Done)\x1b[0m\n\n");
 		} else {
-			fmt.Println("")
+			fmt.Print("\x1b[0m\n\n")
 		}
 	}
 
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-	fmt.Printf("\nThroughput monthly: %v tasks delivered\n", throughtputMonthly)
+	fmt.Printf("Throughput monthly: %v tasks delivered\n", throughtputMonthly)
 	fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
 	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
@@ -319,7 +334,6 @@ func main() {
 
 type CLParameters struct {
 	Login string
-	Password string
 	StartDate time.Time
 	EndDate time.Time
 	JiraUrl string
