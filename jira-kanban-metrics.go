@@ -295,7 +295,9 @@ func main() {
 						}
 					}
 
-					fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
+					if !start.IsZero() {
+						fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
+					}
 				}
 			}
 		}
