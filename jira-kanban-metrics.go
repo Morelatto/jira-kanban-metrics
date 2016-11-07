@@ -262,16 +262,12 @@ func main() {
 	troughputSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND status CHANGED TO '%v' DURING('%v', '%v')", 
 								   boardCfg.Project, boardCfg.DoneStatus, startDate, endDate)
 
-	fmt.Printf(troughputSearch)
-
 	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
 
 	wipSearch := fmt.Sprintf("project = %v AND issuetype != Epic AND (status WAS IN (%v) " + 
 							 "DURING('%v', '%v') or status CHANGED TO 'DONE' DURING('2016/10/01', '2016/10/30'))", 
 							 boardCfg.Project, formatColumns(boardCfg.WipStatuses), startDate, endDate)
-
-	fmt.Printf(wipSearch)
 
 	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
