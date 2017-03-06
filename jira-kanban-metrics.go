@@ -325,13 +325,15 @@ func main() {
 			issueDaysInWip++
 		}
 
-		wipDays += issueDaysInWip
-		fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
+		if issueDaysInWip > 0 {
+			wipDays += issueDaysInWip
+			fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
 
-		if resolved {
-			fmt.Printf(" (Done)\x1b[0m\n\n");
-		} else {
-			fmt.Print("\x1b[0m\n\n")
+			if resolved {
+				fmt.Printf(" (Done)\x1b[0m\n\n");
+			} else {
+				fmt.Print("\x1b[0m\n\n")
+			}
 		}
 	}
 
