@@ -177,8 +177,8 @@ func round(number float64) int {
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
-	if len(os.Args) != 5 {
-		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl>\n", os.Args[0])
+	if len(os.Args) < 5 {
+		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl> --debug\n", os.Args[0])
 		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
 		os.Exit(0)
 	}
@@ -187,6 +187,13 @@ func processCommandLineParameters() CLParameters {
 	parameters.StartDate = parseDate(os.Args[2])
 	parameters.EndDate = parseDate(os.Args[3])
 	parameters.JiraUrl = os.Args[4]
+	parameters.Debug = false
+
+	if len(os.Args) == 6 {
+		if os.Args[5] == "--debug" {
+			parameters.Debug = true
+		}
+	}
 
 	return parameters
 }
@@ -273,10 +280,19 @@ func main() {
 	wipMonthly := result.Total
 
 	var wipDays int = 0
+	var idleDays int = 0
 
+	// Transitions on the board: issue -> changelog -> items -> field:status
 	for _, issue := range result.Issues {
+		
 		var start time.Time
 		var end time.Time = parameters.EndDate
+		
+		var idleStart time.Time
+		var idleEnd time.Time
+		var isIdle bool = false
+		var issueDaysInIdle int = 0
+		
 		var lastDayResolved bool = true
 		var resolved bool = false
 
@@ -285,6 +301,7 @@ func main() {
 			for _, item := range history.Items {
 
 				if item.Field == "status" {
+					// Date when the transition happened
 					statusChangeTime := stripHours(parseJiraTime(history.Created))
 
 					// FIX: consider only the first change to DEV, a task should not go back on a kanban board
@@ -295,7 +312,7 @@ func main() {
 						if start.Before(parameters.StartDate) {
 							start = parameters.StartDate
 						}
-					
+
 					} else if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) {
 						end = statusChangeTime
 						resolved = true
@@ -306,7 +323,20 @@ func main() {
 						}
 					}
 
-					if !start.IsZero() {
+					// Calculate days on Idle columns
+					if containsStatus(boardCfg.IdleStatuses, item.Tostring) {
+						fmt.Printf("Tostring = %v\n", item.Tostring)
+						idleStart = statusChangeTime
+						isIdle = true
+
+					} else if containsStatus(boardCfg.IdleStatuses, item.Fromstring) {
+						fmt.Printf("Fromstring = %v\n", item.Fromstring)
+						idleEnd = statusChangeTime
+						issueDaysInIdle += countWeekDays(idleStart, idleEnd)
+						isIdle = false
+					}
+
+					if !start.IsZero() && parameters.Debug {
 						fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
 					}
 				}
@@ -317,18 +347,28 @@ func main() {
 			continue
 		}
 
+		// Task is still in an idle column by the end of the selected period
+		if isIdle {
+			fmt.Printf("idleStart = %v\n", idleStart)
+			issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
+		}
+
+		idleDays += issueDaysInIdle
+
 		weekendDays := countWeekendDays(start, end)
 		issueDaysInWip := round((end.Sub(start).Hours() / 24)) - weekendDays
 
-		// if a task Resolved date overlaps the EndDate parameter, it means that the last day should count as a WIP day
+		// If a task Resolved date overlaps the EndDate parameter, it means that the last day should count as a WIP day
 		if !lastDayResolved {
 			issueDaysInWip++
 		}
 
-		if issueDaysInWip > 0 {
-			wipDays += issueDaysInWip
-			fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Start: %v - End: %v", issue.Key, issueDaysInWip, formatJiraDate(start), formatJiraDate(end))
+		wipDays += issueDaysInWip
 
+		if parameters.Debug {
+			fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Idle days: %v - Start: %v - End: %v", 
+				issue.Key, issueDaysInWip, issueDaysInIdle, formatJiraDate(start), formatJiraDate(end))
+			
 			if resolved {
 				fmt.Printf(" (Done)\x1b[0m\n\n");
 			} else {
@@ -344,6 +384,7 @@ func main() {
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
 	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
 	fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
+	fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / wipDays))
 	fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 }
 
@@ -352,11 +393,13 @@ type CLParameters struct {
 	StartDate time.Time
 	EndDate time.Time
 	JiraUrl string
+	Debug bool
 }
 
 type BoardCfg struct {
 	Project string
 	WipStatuses []string
+	IdleStatuses []string
 	StartStatuses []string
 	DoneStatus string
 }
