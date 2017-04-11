@@ -1,0 +1,3 @@
+[submodule "src/speakeasy"]
+	path = src/speakeasy
+	url = https://github.com/bgentry/speakeasy

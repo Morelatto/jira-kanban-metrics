@@ -23,10 +23,8 @@ import (
 	"fmt"
 	"time"
 	"strings"
+	"speakeasy"
 )
-
-// get password lib
-import "github.com/bgentry/speakeasy"
 
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
@@ -72,12 +70,20 @@ func main() {
 	troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO '%v' DURING('%v', '%v')", 
 								   boardCfg.Project, boardCfg.DoneStatus, startDate, endDate)
 
+	if parameters.Debug {
+		fmt.Printf("Troughput JQL: %v\n\n", troughputSearch)
+	}
+
 	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
 	throughtputMonthly := result.Total
 
 	wipSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status WAS IN (%v) " + 
 							 "DURING('%v', '%v') or status CHANGED TO '%v' DURING('%v', '%v'))", 
 							 boardCfg.Project, formatColumns(boardCfg.WipStatuses), startDate, endDate, boardCfg.DoneStatus, startDate, endDate)
+
+	if parameters.Debug {
+		fmt.Printf("Wip JQL: %v\n\n", wipSearch)
+	}
 
 	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
@@ -104,19 +110,23 @@ func main() {
 			for _, item := range history.Items {
 
 				if item.Field == "status" {
+					
 					// Date when the transition happened
 					statusChangeTime := stripHours(parseJiraTime(history.Created))
 
-					// FIX: consider only the first change to DEV, a task should not go back on a kanban board
-					// the OR operator is to evaluate if a task goes directly from Open to another column different from DEV
+					// Transition to WIP
+					// Consider only the first change to WIP, a task should not go back on a kanban board (start.IsZero)
+					// The OR operator is to evaluate if a task goes directly from Open to another column different from DEV
 					if (containsStatus(boardCfg.StartStatuses, item.Fromstring) || containsStatus(boardCfg.WipStatuses, item.Tostring) && start.IsZero()) {
 						start = statusChangeTime
 						
 						if start.Before(parameters.StartDate) {
 							start = parameters.StartDate
 						}
+					}
 
-					} else if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) {
+					// Transition to DONE
+					if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) && !statusChangeTime.After(parameters.EndDate) {
 						end = statusChangeTime
 						resolved = true
 						
@@ -126,19 +136,18 @@ func main() {
 						}
 					}
 
-					// Calculate days on Idle columns
+					// Transition to IDLE
 					if containsStatus(boardCfg.IdleStatuses, item.Tostring) {
-						fmt.Printf("Tostring = %v\n", item.Tostring)
 						idleStart = statusChangeTime
 						isIdle = true
 
 					} else if containsStatus(boardCfg.IdleStatuses, item.Fromstring) {
-						fmt.Printf("Fromstring = %v\n", item.Fromstring)
 						idleEnd = statusChangeTime
-						issueDaysInIdle += countWeekDays(idleStart, idleEnd)
 						isIdle = false
+						issueDaysInIdle += countWeekDays(idleStart, idleEnd)
 					}
 
+					// Log transition
 					if !start.IsZero() && parameters.Debug {
 						fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
 					}
@@ -152,7 +161,6 @@ func main() {
 
 		// Task is still in an idle column by the end of the selected period
 		if isIdle {
-			fmt.Printf("idleStart = %v\n", idleStart)
 			issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
 		}
 
