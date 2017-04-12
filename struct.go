@@ -14,10 +14,10 @@ type CLParameters struct {
 
 type BoardCfg struct {
 	Project string
-	WipStatuses []string
-	IdleStatuses []string
-	StartStatuses []string
-	DoneStatus string
+	OpenStatus []string
+	WipStatus []string
+	IdleStatus []string
+	DoneStatus []string
 }
 
 type Auth struct {

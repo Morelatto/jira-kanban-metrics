@@ -4,14 +4,14 @@ linux_build()
 {
   rm -f jira-kanban-metrics 2> /dev/null
   echo "Building for Linux"
-  go build -o jira-kanban-metrics jira-kanban-metrics.go jira.go jira-board.go parsing.go struct.go
+  go build -o jira-kanban-metrics *.go
 }
 
 windows_build()
 {
   rm -f jira-kanban-metrics.exe 2> /dev/null
   echo "Building for Windows"
-  GOOS=windows GOARCH=386 go build -o jira-kanban-metrics.exe jira-kanban-metrics.go jira.go jira-board.go parsing.go struct.go
+  GOOS=windows GOARCH=386 go build -o jira-kanban-metrics.exe *.go
 }
 
 

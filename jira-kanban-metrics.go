@@ -22,16 +22,18 @@ import (
 	"os"
 	"fmt"
 	"time"
-	"strings"
-	"speakeasy"
 )
+
+const TERM_COLOR_BLUE string = "\x1b[94;1m"
+const TERM_COLOR_YELLOW string = "\x1b[93;1m"
+const TERM_COLOR_WHITE string = "\x1b[0m"
 
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
 	if len(os.Args) < 5 {
 		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl> --debug\n", os.Args[0])
-		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\nfs", os.Args[0])
+		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\n", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -50,140 +52,126 @@ func processCommandLineParameters() CLParameters {
 	return parameters
 }
 
-func main() {
-	var parameters CLParameters = processCommandLineParameters()
+func extractMonthlyThroughput(parameters CLParameters, auth Auth, boardCfg BoardCfg) int {
+	troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO %v DURING('%v', '%v')", 
+								   boardCfg.Project, formatColumns(boardCfg.DoneStatus), formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
-	boardCfg := loadBoardCfg()
-
-	password, err := speakeasy.Ask("Password: ")
-	if err != nil {
-		panic(err)
+	if parameters.Debug {
+		fmt.Printf(TERM_COLOR_BLUE + "Troughput JQL: " + TERM_COLOR_WHITE + "%v\n\n", troughputSearch)
 	}
 
-	var auth Auth = authenticate(parameters.Login, password, parameters.JiraUrl)
+	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
+	return result.Total
+}
+
+func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
+	throughtputMonthly := extractMonthlyThroughput(parameters, auth, boardCfg)
 
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
 
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", boardCfg.Project, startDate, endDate)
-
-	troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO '%v' DURING('%v', '%v')", 
-								   boardCfg.Project, boardCfg.DoneStatus, startDate, endDate)
-
-	if parameters.Debug {
-		fmt.Printf("Troughput JQL: %v\n\n", troughputSearch)
-	}
-
-	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
-	throughtputMonthly := result.Total
-
 	wipSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status WAS IN (%v) " + 
-							 "DURING('%v', '%v') or status CHANGED TO '%v' DURING('%v', '%v'))", 
-							 boardCfg.Project, formatColumns(boardCfg.WipStatuses), startDate, endDate, boardCfg.DoneStatus, startDate, endDate)
+							 "DURING('%v', '%v') or status CHANGED TO %v DURING('%v', '%v'))", 
+							 boardCfg.Project, formatColumns(boardCfg.WipStatus), startDate, endDate, formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
 	if parameters.Debug {
-		fmt.Printf("Wip JQL: %v\n\n", wipSearch)
+		fmt.Printf(TERM_COLOR_BLUE + "WIP JQL: " + TERM_COLOR_WHITE + "%v\n\n", wipSearch)
 	}
 
-	result = searchIssues(wipSearch, parameters.JiraUrl, auth)
+	result := searchIssues(wipSearch, parameters.JiraUrl, auth)
 	wipMonthly := result.Total
 
 	var wipDays int = 0
 	var idleDays int = 0
 
-	// Transitions on the board: issue -> changelog -> items -> field:status
+	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range result.Issues {
 		
-		var start time.Time
-		var end time.Time = parameters.EndDate
+		var wipTransitionDate time.Time
+		var doneTransitionDate time.Time = parameters.EndDate
 		
 		var idleStart time.Time
 		var idleEnd time.Time
 		var isIdle bool = false
 		var issueDaysInIdle int = 0
 		
-		var lastDayResolved bool = true
 		var resolved bool = false
 
 		for _, history := range issue.Changelog.Histories {
-			
+
 			for _, item := range history.Items {
 
 				if item.Field == "status" {
-					
+
 					// Date when the transition happened
 					statusChangeTime := stripHours(parseJiraTime(history.Created))
 
-					// Transition to WIP
-					// Consider only the first change to WIP, a task should not go back on a kanban board (start.IsZero)
-					// The OR operator is to evaluate if a task goes directly from Open to another column different from DEV
-					if (containsStatus(boardCfg.StartStatuses, item.Fromstring) || containsStatus(boardCfg.WipStatuses, item.Tostring) && start.IsZero()) {
-						start = statusChangeTime
+					// Transition from OPEN to WIP
+					if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring)) {
+						wipTransitionDate = statusChangeTime
 						
-						if start.Before(parameters.StartDate) {
-							start = parameters.StartDate
+						if wipTransitionDate.Before(parameters.StartDate) {
+							wipTransitionDate = parameters.StartDate
 						}
 					}
 
-					// Transition to DONE
-					if strings.EqualFold(item.Tostring, boardCfg.DoneStatus) && !statusChangeTime.After(parameters.EndDate) {
-						end = statusChangeTime
-						resolved = true
-						
-						if end.After(parameters.EndDate) {
-							end = parameters.EndDate
-							lastDayResolved = false
+					// Transition from WIP to DONE
+					if (containsStatus(boardCfg.WipStatus, item.Fromstring) && containsStatus(boardCfg.DoneStatus, item.Tostring)) {
+						doneTransitionDate = parameters.EndDate
+
+						// If the transition happened during the period, the task is resolved
+						if statusChangeTime.Before(parameters.EndDate) || statusChangeTime.Equal(parameters.EndDate) {
+							doneTransitionDate = statusChangeTime
+							resolved = true
 						}
+					}
+
+					// Transition from OPEN to DONE
+					if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.DoneStatus, item.Tostring)) {
+						wipTransitionDate = statusChangeTime
+						doneTransitionDate = statusChangeTime
+						resolved = true
 					}
 
 					// Transition to IDLE
-					if containsStatus(boardCfg.IdleStatuses, item.Tostring) {
+					if containsStatus(boardCfg.IdleStatus, item.Tostring) {
 						idleStart = statusChangeTime
 						isIdle = true
 
-					} else if containsStatus(boardCfg.IdleStatuses, item.Fromstring) {
+					// Transition from IDLE
+					} else if containsStatus(boardCfg.IdleStatus, item.Fromstring) {
 						idleEnd = statusChangeTime
 						isIdle = false
 						issueDaysInIdle += countWeekDays(idleStart, idleEnd)
 					}
 
-					// Log transition
-					if !start.IsZero() && parameters.Debug {
+					// Log debug the transition
+					if parameters.Debug {
 						fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
 					}
 				}
 			}
 		}
 
-		if start.IsZero() {
-			continue
-		}
-
-		// Task is still in an idle column by the end of the selected period
+		// Task is still in an IDLE column by the end of the selected period
 		if isIdle {
 			issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
 		}
-
 		idleDays += issueDaysInIdle
 
-		weekendDays := countWeekendDays(start, end)
-		issueDaysInWip := round((end.Sub(start).Hours() / 24)) - weekendDays
-
-		// If a task Resolved date overlaps the EndDate parameter, it means that the last day should count as a WIP day
-		if !lastDayResolved {
-			issueDaysInWip++
-		}
+		weekendDays := countWeekendDays(wipTransitionDate, doneTransitionDate)
+		issueDaysInWip := round((doneTransitionDate.Sub(wipTransitionDate).Hours() / 24)) - weekendDays
 
 		wipDays += issueDaysInWip
 
 		if parameters.Debug {
-			fmt.Printf("\n\x1b[94;1mTask: %v - Days on the board: %v - Idle days: %v - Start: %v - End: %v", 
-				issue.Key, issueDaysInWip, issueDaysInIdle, formatJiraDate(start), formatJiraDate(end))
+			fmt.Printf("\n" + TERM_COLOR_BLUE + "Task: %v - WIP days: %v - Idle days: %v - Start: %v - End: %v", 
+				issue.Key, issueDaysInWip, issueDaysInIdle, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 			
 			if resolved {
-				fmt.Printf(" (Done)\x1b[0m\n\n");
+				fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n");
 			} else {
-				fmt.Print("\x1b[0m\n\n")
+				fmt.Print(TERM_COLOR_WHITE + "\n\n")
 			}
 		}
 	}
@@ -197,4 +185,17 @@ func main() {
 	fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
 	if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / wipDays)) }
 	fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+}
+
+func main() {
+	var parameters CLParameters = processCommandLineParameters()
+
+	var auth Auth = authenticate(parameters.Login, parameters.JiraUrl)
+
+	boardCfg := loadBoardCfg()
+
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", 
+		boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
+
+	extractMetrics(parameters, auth, boardCfg)
 }

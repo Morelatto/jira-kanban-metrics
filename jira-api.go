@@ -10,9 +10,15 @@ import (
 	"net/url"
 	"crypto/tls"
 	"encoding/json"
+	"speakeasy"
 )
 
-func authenticate(username string, password string, jiraUrl string) Auth {
+func authenticate(username string, jiraUrl string) Auth {
+	password, err := speakeasy.Ask("Password: ")
+	if err != nil {
+		panic(err)
+	}
+
 	var authUrl = jiraUrl + "/rest/auth/1/session"
 	var jsonStr = []byte(`{"username":"` + username + `", "password":"` + password + `"}`)
 
