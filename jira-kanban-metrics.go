@@ -33,7 +33,7 @@ func processCommandLineParameters() CLParameters {
 
 	if len(os.Args) < 5 {
 		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl> --debug\n", os.Args[0])
-		fmt.Printf("example: %v user passwd 01/31/2010 04/31/2010 http://jira.intranet/jira\n", os.Args[0])
+		fmt.Printf("example: %v user 01/31/2010 04/31/2010 http://jira.intranet/jira\n", os.Args[0])
 		os.Exit(0)
 	}
 
@@ -107,8 +107,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					statusChangeTime := stripHours(parseJiraTime(history.Created))
 
 					// Transition from OPEN to WIP
-					if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring)) {
+					// Consider only the first transition to WIP, a task should not go back on a kanban board
+					if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring) && wipTransitionDate.IsZero()) {
 						wipTransitionDate = statusChangeTime
+						resolved = false
 						
 						if wipTransitionDate.Before(parameters.StartDate) {
 							wipTransitionDate = parameters.StartDate
@@ -131,6 +133,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 						wipTransitionDate = statusChangeTime
 						doneTransitionDate = statusChangeTime
 						resolved = true
+
+						if wipTransitionDate.Before(parameters.StartDate) {
+							wipTransitionDate = parameters.StartDate
+						}
+						if doneTransitionDate.After(parameters.EndDate) {
+							doneTransitionDate = parameters.EndDate
+						}
 					}
 
 					// Transition to IDLE
