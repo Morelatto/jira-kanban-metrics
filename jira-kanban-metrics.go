@@ -22,10 +22,12 @@ import (
 	"os"
 	"fmt"
 	"time"
+	"strings"
 )
 
 const TERM_COLOR_BLUE string = "\x1b[94;1m"
 const TERM_COLOR_YELLOW string = "\x1b[93;1m"
+const TERM_COLOR_RED string = "\x1b[91;1m"
 const TERM_COLOR_WHITE string = "\x1b[0m"
 
 func processCommandLineParameters() CLParameters {
@@ -83,6 +85,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 	var wipDays int = 0
 	var idleDays int = 0
+	var bugCount int = 0
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range result.Issues {
@@ -96,6 +99,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var issueDaysInIdle int = 0
 		
 		var resolved bool = false
+
+		if strings.EqualFold(issue.Fields.Issuetype.Name, "Bug") {
+			bugCount++
+		}
 
 		for _, history := range issue.Changelog.Histories {
 
@@ -162,6 +169,11 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			}
 		}
 
+		if (wipTransitionDate.IsZero()) {
+			fmt.Printf(TERM_COLOR_RED + "\nNo transition date to WIP found for task %v\n\n" + TERM_COLOR_WHITE, issue.Key)
+			continue
+		}
+
 		// Task is still in an IDLE column by the end of the selected period
 		if isIdle {
 			issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
@@ -187,13 +199,16 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-	fmt.Printf("Throughput monthly: %v tasks delivered\n", throughtputMonthly)
+	fmt.Printf("Throughput monthly: %v tasks delivered (%v bugs)\n", throughtputMonthly, bugCount)
 	fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
 	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
-	fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
-	if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / wipDays)) }
-	fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+
+	if (wipDays > 0) {
+		fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
+		if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / wipDays)) }
+		fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+	}
 }
 
 func main() {
