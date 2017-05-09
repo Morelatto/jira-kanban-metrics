@@ -22,7 +22,6 @@ import (
 	"os"
 	"fmt"
 	"time"
-	"strings"
 )
 
 const TERM_COLOR_BLUE string = "\x1b[94;1m"
@@ -85,24 +84,20 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 	var wipDays int = 0
 	var idleDays int = 0
-	var bugCount int = 0
+	var issueTypeMap map[string]int = make(map[string]int)
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range result.Issues {
-		
+
 		var wipTransitionDate time.Time
 		var doneTransitionDate time.Time = parameters.EndDate
-		
+
 		var idleStart time.Time
 		var idleEnd time.Time
 		var isIdle bool = false
 		var issueDaysInIdle int = 0
-		
-		var resolved bool = false
 
-		if strings.EqualFold(issue.Fields.Issuetype.Name, "Bug") {
-			bugCount++
-		}
+		var resolved bool = false
 
 		for _, history := range issue.Changelog.Histories {
 
@@ -118,7 +113,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring) && wipTransitionDate.IsZero()) {
 						wipTransitionDate = statusChangeTime
 						resolved = false
-						
+
 						if wipTransitionDate.Before(parameters.StartDate) {
 							wipTransitionDate = parameters.StartDate
 						}
@@ -174,6 +169,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			continue
 		}
 
+		if (resolved) {
+			issueTypeMap[issue.Fields.Issuetype.Name]++
+		}
+
 		// Task is still in an IDLE column by the end of the selected period
 		if isIdle {
 			issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
@@ -188,7 +187,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		if parameters.Debug {
 			fmt.Printf("\n" + TERM_COLOR_BLUE + "Task: %v - WIP days: %v - Idle days: %v - Start: %v - End: %v", 
 				issue.Key, issueDaysInWip, issueDaysInIdle, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
-			
+
 			if resolved {
 				fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n");
 			} else {
@@ -199,15 +198,20 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-	fmt.Printf("Throughput monthly: %v tasks delivered (%v bugs)\n", throughtputMonthly, bugCount)
+	fmt.Printf("Throughput monthly: %v tasks delivered\n", throughtputMonthly)
 	fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
-	fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
+	fmt.Printf("Throughput by Issue type:\n")
+	for key, value := range issueTypeMap {
+		fmt.Printf("- %v: %v\n", key, value)
+	}
+
+	fmt.Printf("\nWIP monthly: %v tasks\n", wipMonthly)
 
 	if (wipDays > 0) {
 		fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
-		if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / wipDays)) }
-		fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+		if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / weekDays)) }
+		fmt.Printf("\nLead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 	}
 }
 
