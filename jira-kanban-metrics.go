@@ -201,7 +201,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	fmt.Printf("Throughput monthly: %v tasks delivered\n", throughtputMonthly)
 	fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
 	fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
-	fmt.Printf("Throughput by Issue type:\n")
+	fmt.Printf("Throughput by issue type:\n")
 	for key, value := range issueTypeMap {
 		fmt.Printf("- %v: %v\n", key, value)
 	}
@@ -211,7 +211,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	if (wipDays > 0) {
 		fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
 		if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / weekDays)) }
-		fmt.Printf("\nLead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+		fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 	}
 }
 
