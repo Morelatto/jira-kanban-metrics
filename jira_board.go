@@ -7,11 +7,11 @@ import (
 )
 
 func loadBoardCfg() BoardCfg {
-    if _, err := os.Stat("jira-board.cfg"); os.IsNotExist(err) {
-        panic("jira-board.cfg not found")
+    if _, err := os.Stat("jira_board.cfg"); os.IsNotExist(err) {
+        panic("jira_board.cfg not found")
     }
 
-    file, _ := os.Open("jira-board.cfg")
+    file, _ := os.Open("jira_board.cfg")
     decoder := json.NewDecoder(file)
     boardCfg := BoardCfg{}
     err := decoder.Decode(&boardCfg)
