@@ -25,7 +25,7 @@ func parseJiraTime(timeStr string) time.Time {
         panic(err)
     }
 
-    return parsedTime
+    return parsedTime.UTC()
 }
 
 func formatJiraDate(date time.Time) string {

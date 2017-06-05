@@ -164,6 +164,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             }
         }
 
+        if parameters.Debug {
+            fmt.Printf("\n")
+        }
+
         if (wipTransitionDate.IsZero()) {
             fmt.Printf(TERM_COLOR_RED + "\nNo transition date to WIP found for task %v\n\n" + TERM_COLOR_WHITE, issue.Key)
             continue
@@ -173,7 +177,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             issueTypeMap[issue.Fields.Issuetype.Name]++
         }
 
-        // Task is still in an IDLE column by the end of the selected period
+        // Task is still in an IDLE column by the end of the specified period
         if isIdle {
             issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
         }
@@ -184,37 +188,40 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
         wipDays += issueDaysInWip
 
-        if parameters.Debug {
-            fmt.Printf("\n" + TERM_COLOR_BLUE + "Issue: %v - WIP days: %v - Idle days: %v - Start: %v - End: %v", 
-                issue.Key, issueDaysInWip, issueDaysInIdle, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
+        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Idle days: %v - Start: %v - End: %v", 
+            issue.Key, issue.Fields.Summary, issueDaysInWip, issueDaysInIdle, 
+            formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 
-            if resolved {
-                fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n");
-            } else {
-                fmt.Print(TERM_COLOR_WHITE + "\n\n")
-            }
+        if resolved {
+            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n");
+        } else {
+            fmt.Print(TERM_COLOR_WHITE + "\n\n")
         }
     }
 
     weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-    fmt.Printf("===========================================\n")
-    fmt.Printf("Throughput monthly: %v tasks delivered\n", throughtputMonthly)
-    fmt.Printf("Throughput weekly: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(4))
-    fmt.Printf("Throughput daily: %.2f tasks delivered\n", float64(throughtputMonthly) / float64(weekDays))
-    fmt.Printf("Throughput by issue type:\n")
+    fmt.Printf("> Throughput\n")
+    fmt.Printf("Monthly: %v tasks delivered\n", throughtputMonthly)
+    fmt.Printf("Weekly: %.2f tasks\n", float64(throughtputMonthly) / float64(4))
+    fmt.Printf("Daily: %.2f tasks\n", float64(throughtputMonthly) / float64(weekDays))
+    fmt.Printf("By issue type:\n")
     for key, value := range issueTypeMap {
-        fmt.Printf("- %v: %v (%v%%)\n", key, value, ((value * 100) / throughtputMonthly))
+        fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, ((value * 100) / throughtputMonthly))
     }
 
-    fmt.Printf("WIP monthly: %v tasks\n", wipMonthly)
-
+    fmt.Printf("\n> WIP\n")
+    fmt.Printf("Monthly: %v tasks\n", wipMonthly)
     if (wipDays > 0) {
-        fmt.Printf("WIP daily: %.2f tasks\n", float64(wipDays) / float64(weekDays))
-        if idleDays > 0 { fmt.Printf("Idle days: %v (%v%%)\n", idleDays, ((idleDays * 100) / weekDays)) }
-        fmt.Printf("Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+        fmt.Printf("Average: %.2f tasks\n", float64(wipDays) / float64(weekDays))
     }
-    fmt.Printf("===========================================\n")
+
+    if idleDays > 0 {
+        fmt.Printf("\n> Idle\n")
+        fmt.Printf("Average by task: %.2f days\n", float64(idleDays) / float64(throughtputMonthly))
+    }
+
+    fmt.Printf("\n> Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
 }
 
 func main() {
