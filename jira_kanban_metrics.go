@@ -77,9 +77,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     result := searchIssues(wipSearch, parameters.JiraUrl, auth)
     wipMonthly := result.Total
 
+    // Add one day to end date limit to include it in time comparisons
+    parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
+
     var wipDays int = 0 // Absolute number of WIP days of all issues during the specified period
-    var idleDays int = 0 // Absolute number of Idle days of all issues during the specified period
-    var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type
+    var directResolvedIssues int = 0 // Absolute number of direct resolved issues (from OPEN to DONE)
+    var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
+    var totalDurationMap map[string]float64 = make(map[string]float64) // Total duration [value] by status [key] of all issues
 
     // Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
     for _, issue := range result.Issues {
@@ -87,12 +91,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         var wipTransitionDate time.Time
         var doneTransitionDate time.Time = parameters.EndDate
 
-        var idleStart time.Time
-        var idleEnd time.Time
-        var isIdle bool = false
-        var issueDaysInIdle int = 0
-
         var resolved bool = false
+
+        var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
+        var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
 
         for _, history := range issue.Changelog.Histories {
 
@@ -100,8 +102,38 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
                 if item.Field == "status" {
 
-                    // Date when the transition happened
-                    statusChangeTime := stripHours(parseJiraTime(history.Created))
+                    // Timestamp when the transition happened
+                    statusChangeTime := parseJiraTime(history.Created)
+
+                    if (containsStatus(boardCfg.WipStatus, item.Tostring)) {
+                        _, ok := statusChangeMap[item.Tostring]
+                        if ok {
+                            panic("Transition TO issue " + item.Tostring + " happened twice before a corresponding FROM transition was found")
+                        }
+                        if statusChangeTime.Before(parameters.StartDate) {
+                            statusChangeMap[item.Tostring] = parameters.StartDate
+                        } else if statusChangeTime.After(parameters.EndDate) {
+                            statusChangeMap[item.Tostring] = parameters.EndDate
+                        } else {
+                            statusChangeMap[item.Tostring] = statusChangeTime
+                        }
+                    }
+
+                    if (containsStatus(boardCfg.WipStatus, item.Fromstring)) {
+                        fromDate := parameters.EndDate
+                        toDate, ok := statusChangeMap[item.Fromstring]
+                        if !ok {
+                            panic("Transition FROM issue " + item.Fromstring + " doesn't have a corresponding TO transition")
+                        }
+                        delete(statusChangeMap, item.Fromstring)
+                        if !statusChangeTime.Before(parameters.StartDate) {
+                            if !statusChangeTime.After(parameters.EndDate) {
+                                fromDate = statusChangeTime
+                            }
+                            duration := int64(fromDate.Sub(toDate))
+                            durationMap[item.Fromstring] += duration
+                        }
+                    }
 
                     // Transition from OPEN to WIP
                     // Consider only the first transition to WIP, a task should not go back on a kanban board
@@ -129,6 +161,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.DoneStatus, item.Tostring)) {
                         wipTransitionDate = statusChangeTime
                         doneTransitionDate = statusChangeTime
+                        directResolvedIssues++
                         resolved = true
 
                         if wipTransitionDate.Before(parameters.StartDate) {
@@ -137,18 +170,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                         if doneTransitionDate.After(parameters.EndDate) {
                             doneTransitionDate = parameters.EndDate
                         }
-                    }
-
-                    // Transition to IDLE
-                    if containsStatus(boardCfg.IdleStatus, item.Tostring) {
-                        idleStart = statusChangeTime
-                        isIdle = true
-
-                    // Transition from IDLE
-                    } else if containsStatus(boardCfg.IdleStatus, item.Fromstring) {
-                        idleEnd = statusChangeTime
-                        isIdle = false
-                        issueDaysInIdle += countWeekDays(idleStart, idleEnd)
                     }
 
                     // Log debug the transition
@@ -172,23 +193,29 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             issueTypeMap[issue.Fields.Issuetype.Name]++
         }
 
-        // Task is still in an IDLE column by the end of the specified period
-        if isIdle {
-            issueDaysInIdle += countWeekDays(idleStart, parameters.EndDate)
-        }
-        idleDays += issueDaysInIdle
-
         weekendDays := countWeekendDays(wipTransitionDate, doneTransitionDate)
-        issueDaysInWip := round((doneTransitionDate.Sub(wipTransitionDate).Hours() / 24)) - weekendDays
+        issueDaysInWip := round(doneTransitionDate.Sub(wipTransitionDate).Hours() / 24) - weekendDays
 
         wipDays += issueDaysInWip
 
-        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Idle days: %v - Start: %v - End: %v", 
-            issue.Key, issue.Fields.Summary, issueDaysInWip, issueDaysInIdle, 
-            formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
+        periodDuration := int64(doneTransitionDate.Sub(wipTransitionDate))
+        if periodDuration > 0 {
+            for k, v := range durationMap {
+                periodPercent := float64(v * 100) / float64(periodDuration)
+                if periodPercent >= 0.01 {
+                    if parameters.Debug {
+                        fmt.Printf("%v = %.2f%%\n", k, periodPercent)
+                    }
+                    totalDurationMap[k] += periodPercent
+                }
+            }
+        }
+
+        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Start: %v - End: %v", 
+            issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 
         if resolved {
-            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n");
+            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
         } else {
             fmt.Print(TERM_COLOR_WHITE + "\n\n")
         }
@@ -196,7 +223,27 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-    fmt.Printf("> Throughput\n")
+    if wipDays > 0 {
+        var totalIdle float64 = 0
+        fmt.Printf("> Average by Status\n")
+
+        for k, v := range totalDurationMap {
+            percent := v / float64(wipMonthly - directResolvedIssues)
+            fmt.Printf("- %v: %.2f%%", k, percent)
+            if containsStatus(boardCfg.IdleStatus, k) {
+                totalIdle += percent
+                fmt.Printf(" (Idle)\n")
+            } else {
+                fmt.Printf("\n")
+            }
+        }
+
+        if totalIdle > 0 {
+            fmt.Printf("- Idle Total: %.2f%%\n", totalIdle)
+        }
+    }
+
+    fmt.Printf("\n> Throughput\n")
     fmt.Printf("Monthly: %v tasks delivered\n", throughtputMonthly)
     fmt.Printf("Weekly: %.2f tasks\n", float64(throughtputMonthly) / float64(4))
     fmt.Printf("Daily: %.2f tasks\n", float64(throughtputMonthly) / float64(weekDays))
@@ -207,13 +254,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     fmt.Printf("\n> WIP\n")
     fmt.Printf("Monthly: %v tasks\n", wipMonthly)
-    if (wipDays > 0) {
+    if wipDays > 0 {
         fmt.Printf("Average: %.2f tasks\n", float64(wipDays) / float64(weekDays))
-    }
-
-    if idleDays > 0 {
-        fmt.Printf("\n> Idle\n")
-        fmt.Printf("Average by task: %.2f days\n", float64(idleDays) / float64(throughtputMonthly))
     }
 
     fmt.Printf("\n> Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
