@@ -34,6 +34,10 @@ func authenticate(username string, jiraUrl string) Auth {
         panic(err)
     }
 
+    if resp.StatusCode != 200 {
+        panic("Jira authentication failure")
+    }
+
     defer resp.Body.Close()
     body, _ := ioutil.ReadAll(resp.Body)
 
