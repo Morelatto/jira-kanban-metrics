@@ -92,14 +92,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         var doneTransitionDate time.Time = parameters.EndDate
 
         var resolved bool = false
+        var ignoreIssue bool = false
 
-        var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
         var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
+        var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
 
         for _, history := range issue.Changelog.Histories {
-
             for _, item := range history.Items {
-
                 if item.Field == "status" {
 
                     // Timestamp when the transition happened
@@ -108,7 +107,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     if (containsStatus(boardCfg.WipStatus, item.Tostring)) {
                         _, ok := statusChangeMap[item.Tostring]
                         if ok {
-                            panic("Transition TO issue " + item.Tostring + " happened twice before a corresponding FROM transition was found")
+                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition TO issue %v happened twice before a corresponding FROM transition was found, ignoring transition\n" + TERM_COLOR_WHITE, 
+                                issue.Key, item.Tostring)
+                            continue
                         }
                         if statusChangeTime.Before(parameters.StartDate) {
                             statusChangeMap[item.Tostring] = parameters.StartDate
@@ -123,7 +124,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                         fromDate := parameters.EndDate
                         toDate, ok := statusChangeMap[item.Fromstring]
                         if !ok {
-                            panic("Transition FROM issue " + item.Fromstring + " doesn't have a corresponding TO transition")
+                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition FROM issue %v doesn't have a corresponding TO transition\n" + TERM_COLOR_WHITE,
+                                issue.Key, item.Fromstring)
+                            continue
                         }
                         delete(statusChangeMap, item.Fromstring)
                         if !statusChangeTime.Before(parameters.StartDate) {
@@ -136,9 +139,14 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     }
 
                     // Transition from OPEN to WIP
-                    // Consider only the first transition to WIP, a task should not go back on a kanban board
-                    if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring) && wipTransitionDate.IsZero()) {
+                    if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring)) {
+                        if (statusChangeTime.After(parameters.EndDate)) {
+                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition to WIP happened after end date: %v, ignoring issue\n" + TERM_COLOR_WHITE, issue.Key, statusChangeTime)
+                            ignoreIssue = true
+                        }
+
                         wipTransitionDate = statusChangeTime
+                        doneTransitionDate = parameters.EndDate
                         resolved = false
 
                         if wipTransitionDate.Before(parameters.StartDate) {
@@ -154,6 +162,15 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                         if statusChangeTime.Before(parameters.EndDate) || statusChangeTime.Equal(parameters.EndDate) {
                             doneTransitionDate = statusChangeTime
                             resolved = true
+                        }
+                    }
+
+                    // Transition from WIP to OPEN
+                    if (containsStatus(boardCfg.WipStatus, item.Fromstring) && containsStatus(boardCfg.OpenStatus, item.Tostring)) {
+                        doneTransitionDate = parameters.EndDate
+
+                        if statusChangeTime.Before(parameters.EndDate) || statusChangeTime.Equal(parameters.EndDate) {
+                            doneTransitionDate = statusChangeTime
                         }
                     }
 
@@ -174,18 +191,32 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
                     // Log debug the transition
                     if parameters.Debug {
-                        fmt.Printf("%v -> %v (%v) ", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
+                        fmt.Printf("%v -> %v (%v)\n", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
                     }
                 }
             }
         }
 
-        if parameters.Debug {
-            fmt.Printf("\n")
+        // Count duration of last transition until the end of the specified period
+        if len(statusChangeMap) == 1 {
+            for status, toDate := range statusChangeMap {
+                fromDate := parameters.EndDate
+                duration := int64(fromDate.Sub(toDate))
+                durationMap[status] += duration
+            }
+
+        } else if len(statusChangeMap) > 1 {
+            fmt.Printf(TERM_COLOR_RED + "Issue %v - Status change map state is inconsistent: %v\n" + TERM_COLOR_WHITE, issue.Key, statusChangeMap)
         }
 
+        if ignoreIssue {
+            wipMonthly--
+            continue
+        }
+
+
         if (wipTransitionDate.IsZero()) {
-            fmt.Printf(TERM_COLOR_RED + "\nNo transition date to WIP found for task %v\n\n" + TERM_COLOR_WHITE, issue.Key)
+            fmt.Printf(TERM_COLOR_RED + "Issue %v - No transition date to WIP found\n" + TERM_COLOR_WHITE, issue.Key)
             continue
         }
 
@@ -200,6 +231,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
         periodDuration := int64(doneTransitionDate.Sub(wipTransitionDate))
         if periodDuration > 0 {
+            var total float64 = 0
+
             for k, v := range durationMap {
                 periodPercent := float64(v * 100) / float64(periodDuration)
                 if periodPercent >= 0.01 {
@@ -207,7 +240,12 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                         fmt.Printf("%v = %.2f%%\n", k, periodPercent)
                     }
                     totalDurationMap[k] += periodPercent
+                    total += periodPercent
                 }
+            }
+
+            if total < 99.9 {
+                fmt.Printf(TERM_COLOR_RED + "Issue %v - Average by status %.2f%% total is less than 100%%\n" + TERM_COLOR_WHITE, issue.Key, total)
             }
         }
 
