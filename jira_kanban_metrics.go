@@ -254,9 +254,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Start: %v - End: %v", 
             issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 
-        daysForTasks[formatJiraDate(doneTransitionDate)] =  issueDaysInWip
 
         if resolved {
+            daysForTasks[issue.Key+" "+formatJiraDate(doneTransitionDate)] =  issueDaysInWip
             fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
         } else {
             fmt.Print(TERM_COLOR_WHITE + "\n\n")
