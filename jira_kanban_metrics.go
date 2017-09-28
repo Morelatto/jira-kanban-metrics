@@ -97,8 +97,12 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
         var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
 
+        var epicLink string
+
         for _, history := range issue.Changelog.Histories {
+            
             for _, item := range history.Items {
+                
                 if item.Field == "status" {
 
                     // Timestamp when the transition happened
@@ -193,7 +197,11 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     if parameters.Debug {
                         fmt.Printf("%v -> %v (%v)\n", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
                     }
+                
+                } else if item.Field == "Epic Link" {
+                    epicLink = item.Tostring
                 }
+
             }
         }
 
@@ -251,6 +259,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
         fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Start: %v - End: %v", 
             issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
+
+        if epicLink != "" {
+            fmt.Printf(" - Epic link: %v", epicLink)
+        }
 
         if resolved {
             fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
