@@ -84,6 +84,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     var directResolvedIssues int = 0 // Absolute number of direct resolved issues (from OPEN to DONE)
     var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
     var totalDurationMap map[string]float64 = make(map[string]float64) // Total duration [value] by status [key] of all issues
+    var daysForTasks map[string]int = make(map[string]int)
 
     // Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
     for _, issue := range result.Issues {
@@ -96,6 +97,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
         var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
         var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
+
 
         for _, history := range issue.Changelog.Histories {
             for _, item := range history.Items {
@@ -252,6 +254,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Start: %v - End: %v", 
             issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 
+        daysForTasks[formatJiraDate(doneTransitionDate)] =  issueDaysInWip
+
         if resolved {
             fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
         } else {
@@ -279,6 +283,11 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         if totalIdle > 0 {
             fmt.Printf("- Idle Total: %.2f%%\n", totalIdle)
         }
+    }
+
+    fmt.Printf("\n\n> CFD \n")
+    for k, v := range daysForTasks {
+        fmt.Printf("%v,%v \n",k,v)
     }
 
     fmt.Printf("\n> Throughput\n")
