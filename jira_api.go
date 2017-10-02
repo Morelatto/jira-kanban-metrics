@@ -79,7 +79,7 @@ func httpGet(url string, auth Auth, insecure bool) []byte {
 }
 
 func searchIssues(jql string, jiraUrl string, auth Auth) SearchResult {
-    var searchUrl = jiraUrl + "/rest/api/2/search?jql=" + url.QueryEscape(jql) + "&expand=changelog"
+    var searchUrl = jiraUrl + "/rest/api/2/search?jql=" + url.QueryEscape(jql) + "&expand=changelog&maxResults=1000"
 
     body := httpGet(searchUrl, auth, true)
 

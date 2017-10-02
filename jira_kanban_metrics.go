@@ -253,15 +253,15 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             }
 
             if total < 99.9 {
-                fmt.Printf(TERM_COLOR_RED + "Issue %v - Average by status %.2f%% total is less than 100%%\n" + TERM_COLOR_WHITE, issue.Key, total)
+                fmt.Printf(TERM_COLOR_RED + "Issue %v | Average by status %.2f%% total is less than 100%%\n" + TERM_COLOR_WHITE, issue.Key, total)
             }
         }
 
-        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v - %v - WIP days: %v - Start: %v - End: %v", 
+        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v | %v | WIP days: %v | Start: %v | End: %v |", 
             issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
 
         if epicLink != "" {
-            fmt.Printf(" - Epic link: %v", epicLink)
+            fmt.Printf(" Epic link: %v |", epicLink)
         }
 
         if resolved {
