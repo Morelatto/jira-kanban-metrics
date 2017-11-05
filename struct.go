@@ -10,6 +10,7 @@ type CLParameters struct {
     EndDate time.Time
     JiraUrl string
     Debug bool
+    DebugVerbose bool
 }
 
 type BoardCfg struct {

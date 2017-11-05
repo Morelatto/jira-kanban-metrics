@@ -22,7 +22,6 @@ import (
     "os"
     "fmt"
     "time"
-    "strconv"
 )
 
 func processCommandLineParameters() CLParameters {
@@ -39,10 +38,15 @@ func processCommandLineParameters() CLParameters {
     parameters.EndDate = parseDate(os.Args[3])
     parameters.JiraUrl = os.Args[4]
     parameters.Debug = false
+    parameters.DebugVerbose = false
 
     if len(os.Args) == 6 {
-        if os.Args[5] == "--debug" {
+        debugMethod := os.Args[5]
+        if debugMethod == "--debug" {
             parameters.Debug = true
+        } else if debugMethod == "--debug--verbose" {
+            parameters.Debug = true
+            parameters.DebugVerbose = true
         }
     }
 
@@ -68,13 +72,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     endDate := formatJiraDate(parameters.EndDate)
 
     wipSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic " + 
-                             // "AND issue = MLG-312 " + 
-                             // "AND issue = MLG-353 " + 
-                             "AND issue = MLG-335    " + 
-                             // "AND (status WAS IN (%v) DURING('%v', '%v') " + 
                              "AND (status CHANGED TO %v DURING('%v', '%v'))",                              
                              boardCfg.Project, 
-                             // formatColumns(boardCfg.WipStatus), startDate, endDate, 
                              formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
     if parameters.Debug {
@@ -87,39 +86,35 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     // Add one day to end date limit to include it in time comparisons
     parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
 
-    var wipDays int = 0 // Absolute number of WIP days of all issues during the specified period
-    var directResolvedIssues int = 0 // Absolute number of direct resolved issues (from OPEN to DONE)
+    var totalWipDays int = 0 // Absolute number of WIP days of all issues during the specified period
     var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
-    var totalDurationMap map[string]float64 = make(map[string]float64) // Total duration [value] by status [key] of all issues
+
+    var totalDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
+    var totalDuration time.Duration // total duration of all issues processed by the script
+
 
     // Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
     for _, issue := range result.Issues {
 
-        // var wipTransitionDate time.Time
-        // var doneTransitionDate time.Time = parameters.EndDate
-
         var resolved bool = false
-        // var ignoreIssue bool = false
-        var hasAlreadyFoundLastStatusChange bool = false
-
-
-        // var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
-        // var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
-
-
 
         var durationByStatusMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
-        var durationByStatusTypeMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
-        var issueDurationByStatysMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
-        var totalMinutesByIssue int64
+        var issueDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
+        var issueDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
 
         var epicLink string
 
-        var lastFromStatus string
+        // var lastFromStatus string
         var lastToStatus string
-        var lastFromStatusCreationDate time.Time
-
+        
         var transitionToWipDate time.Time
+
+        var issueCreatedDate time.Time = parseJiraTime(issue.Fields.Created)
+        var lastFromStatusCreationDate time.Time = issueCreatedDate
+        
+        if parameters.DebugVerbose {                 
+            fmt.Printf(TERM_COLOR_YELLOW + "\nIssue Jira: %v | VERBOSE DEBUG START \n", issue.Key)
+        }
 
         for _, history := range issue.Changelog.Histories {
 
@@ -127,52 +122,18 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
                 if item.Field == "status" {
 
-                    // ignoreIssue if has already found the last one inside the period
-                    if (hasAlreadyFoundLastStatusChange) {
-                        continue
-                    }
-
                     // Timestamp when the transition happened
                     statusChangeTime := parseJiraTime(history.Created)
-                    if (statusChangeTime.Before(parameters.StartDate)) {
-                        if parameters.Debug {                
-                            fmt.Printf(TERM_COLOR_RED + "Status changed [%v] before initial period [%v], considering stardDate \n" + TERM_COLOR_WHITE, formatBrDateWithTime(statusChangeTime), formatBrDateWithTime(parameters.StartDate))
-                        }
-                        statusChangeTime = parameters.StartDate
-                    }
-
-                    if (statusChangeTime.After(parameters.EndDate)) {
-                        if parameters.Debug {
-                            fmt.Printf(TERM_COLOR_RED + "Status changed [%v] after end period [%v], considering endDate \n" + TERM_COLOR_WHITE, formatBrDateWithTime(statusChangeTime), formatBrDateWithTime(parameters.StartDate))
-                        }
-                        statusChangeTime = parameters.EndDate
-                        hasAlreadyFoundLastStatusChange = true
-                    }
-
-                    if (statusChangeTime.Before(parameters.StartDate) || statusChangeTime.After(parameters.EndDate)) {
-                        //update vars for next interation
-                        lastFromStatus = item.Fromstring
-                        lastToStatus = item.Tostring
-                        lastFromStatusCreationDate = statusChangeTime
-                        continue
-                    }
-
-                    // Get the first status date, and continue to the next status transition
-                    if (lastFromStatus == "") {
-                        lastFromStatus = item.Fromstring                        
-                        lastFromStatusCreationDate = statusChangeTime
-                        if parameters.Debug {
-                            fmt.Printf(TERM_COLOR_WHITE + "First Status [%v] Created in [%v] \n\n", lastFromStatus, lastFromStatusCreationDate)
-                        }
-                        continue
-                    }
 
                     // Mapping var to calculate total WIP of the issue
                     if (transitionToWipDate.IsZero() && (
-                        containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.WipStatus, item.Tostring) ||
-                        containsStatus(boardCfg.WipStatus, item.Fromstring) || containsStatus(boardCfg.WipStatus, item.Fromstring))) {
+                        containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.IdleStatus, item.Tostring))) {
                         transitionToWipDate = statusChangeTime;
-                        fmt.Printf(TERM_COLOR_RED + "TransitionToWip happened in [%v] \n" + TERM_COLOR_WHITE, formatBrDateWithTime(statusChangeTime))
+                    }
+
+                    // Ignore transitions to the same status
+                    if (item.Fromstring == item.Tostring) {
+                        continue
                     }
 
                     // Calculating status transition duration
@@ -181,24 +142,20 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     if (weekendDaysBetweenDates > 0) {
                         updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)    
                         statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
-                        if parameters.Debug {
-                            fmt.Printf(TERM_COLOR_RED + "Removing weekend days [%v] from Status [%v] \n" + TERM_COLOR_WHITE, weekendDaysBetweenDates, item.Fromstring)
+                        if parameters.DebugVerbose {
+                            fmt.Printf(TERM_COLOR_RED + "Removing weekend days [%v] from Status [%v] \n" + TERM_COLOR_YELLOW, weekendDaysBetweenDates, item.Fromstring)
                         }
                     }
 
-                    if parameters.Debug {
-                        printDebugIssueTransition (parameters.Debug, statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring) 
+                    if parameters.DebugVerbose {
+                        printDebugIssueTransition (parameters.DebugVerbose, statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring) 
                     }
                     
-                    // increment total minutes of this status transition
-                    totalMinutesByIssue += int64(statusChangeDuration.Minutes())
-
                     // Group total minutes by status, considering this status transition
                     durationByStatusMap[item.Fromstring] = durationByStatusMap[item.Fromstring] + int64(statusChangeDuration.Minutes())
-                    issueDurationByStatysMap[item.Fromstring] = issueDurationByStatysMap[item.Fromstring] + statusChangeDuration
+                    issueDurationByStatusMap[item.Fromstring] = issueDurationByStatusMap[item.Fromstring] + statusChangeDuration
 
                     //update vars for next interation
-                    lastFromStatus = item.Fromstring
                     lastToStatus = item.Tostring
                     lastFromStatusCreationDate = statusChangeTime
 
@@ -212,45 +169,34 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         if (lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus)) {
             statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
 
-           // increment total minutes of this status transition
-            totalMinutesByIssue += int64(statusChangeDuration.Minutes())
-
             // Group total minutes by status, considering this status transition          
             durationByStatusMap[lastToStatus] = durationByStatusMap[lastToStatus] + int64(statusChangeDuration.Minutes())
-            issueDurationByStatysMap[lastToStatus] = issueDurationByStatysMap[lastToStatus] + statusChangeDuration
+            issueDurationByStatusMap[lastToStatus] = issueDurationByStatusMap[lastToStatus] + statusChangeDuration
             
             // print debug
             if parameters.Debug {                
                 fmt.Printf(TERM_COLOR_RED + "Status current in development, considering endDate [%v] \n" + TERM_COLOR_WHITE, formatBrDateWithTime(parameters.EndDate))
             }   
-            printDebugIssueTransition (parameters.Debug, parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None") 
+            
+            printDebugIssueTransition (parameters.DebugVerbose, parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None") 
         }
 
-        // Verify if the last transition is to a resolved status
-        if (containsStatus(boardCfg.DoneStatus, lastToStatus)) {
-            resolved = true
-            issueTotalWip := subDatesRemovingWeekends(true, transitionToWipDate, lastFromStatusCreationDate) 
-            fmt.Printf(TERM_COLOR_RED + "Issue total wip [%v] \n" + TERM_COLOR_WHITE, issueTotalWip)                        
+        if parameters.DebugVerbose {                 
+            fmt.Printf(TERM_COLOR_YELLOW + "\nIssue Jira: %v | VERBOSE DEBUG END\n " + TERM_COLOR_WHITE , issue.Key)
         }
 
         fmt.Printf("\n")
 
-        var totalDuration time.Duration
-        for k, v := range issueDurationByStatysMap {  
-            totalDuration = totalDuration + v 
-            if parameters.Debug {
-                statusPercent := float64(v * 100) / float64(totalMinutesByIssue)
-                fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
-            }
+        // Calculate the duration of all status
+        var issueTotalDuration time.Duration
+        for _, v := range issueDurationByStatusMap {  
+            issueTotalDuration += v 
+            totalDuration += v
         }
-
-        fmt.Printf("TOTAL DURATION: [%v]\n", totalDuration)
-
-        fmt.Printf("\n")
 
         // grouping by status type configured in board.cfg
         var statusType string
-        for k, v := range durationByStatusMap {        
+        for k, v := range issueDurationByStatusMap {        
             if (containsStatus(boardCfg.OpenStatus, k)) {
                 statusType = "Open";
             } else if (containsStatus(boardCfg.WipStatus, k)) {
@@ -264,62 +210,76 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                 continue
             }
 
-            durationByStatusTypeMap[statusType] = durationByStatusTypeMap[statusType] + v
+            issueDurationByStatusTypeMap[statusType] = issueDurationByStatusTypeMap[statusType] + v
+        }
 
-            if parameters.Debug {
-                statusPercent := float64(v * 100) / float64(totalMinutesByIssue) 
-                fmt.Printf("%v = %.2f%% [%v minutes] \n", k, statusPercent, v)
+        // Calculating WIP days
+        issueDurationTotalWip := issueDurationByStatusTypeMap["Wip"]+issueDurationByStatusTypeMap["Idle"]
+        issueWipDays := int(issueDurationTotalWip.Hours())/24
+        if (issueWipDays == 0) {
+            issueWipDays = 1
+        }
+        totalWipDays += issueWipDays 
+
+        // Verify if the last transition is to a resolved status
+        if (containsStatus(boardCfg.DoneStatus, lastToStatus)) {
+            resolved = true
+
+            // Double check if the wip is being calculated correct, it's not used for anything else
+            issueTotalWip := subtractDatesRemovingWeekends(transitionToWipDate, lastFromStatusCreationDate)    
+            wipDiffBetweenCalcMethods := issueDurationTotalWip-issueTotalWip
+            if (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1) {
+                fmt.Printf(TERM_COLOR_RED + "Issue has some strange status transition. Please check it!!! \n" + TERM_COLOR_WHITE)                        
             }
         }
-
-        fmt.Printf("\n")
-
-        // calculating percentage by status type configured in board.cfg
-        for k, v := range durationByStatusTypeMap {
-            statusPercent := float64(v * 100) / float64(totalMinutesByIssue) 
-            fmt.Printf("%v = %.2f%% [%v minutes] \n", k, statusPercent, v)
-        }
-
 
         if (resolved) {
             issueTypeMap[issue.Fields.Issuetype.Name]++
         }
 
-        fmt.Printf(TERM_COLOR_BLUE + "Issue Jira: %v | %v | WIP days: %v | ", 
-            issue.Key, issue.Fields.Summary, durationByStatusTypeMap["Wip"]/(24*60))
+        fmt.Printf(TERM_COLOR_BLUE + "Issue Jira: %v | %v | Start: %v| End: %v | WIP days: %v | ", issue.Key, issue.Fields.Summary, 
+            formatBrDateWithTime(transitionToWipDate), formatBrDateWithTime(lastFromStatusCreationDate), issueWipDays)
 
         if epicLink != "" {
             fmt.Printf(" Epic link: %v |", epicLink)
         }
 
         if resolved {
-            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
+            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n")
         } else {
-            fmt.Print(TERM_COLOR_WHITE + "\n\n")
+            fmt.Print(TERM_COLOR_WHITE + "\n")
         }
-    }
 
-    weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
+        // calculating percentage by status type configured in board.cfg
+        for k, v := range issueDurationByStatusTypeMap {
+            statusPercent := float64(v * 100) / float64(issueTotalDuration) 
 
-    if wipDays > 0 {
-        var totalIdle float64 = 0
-        fmt.Printf("> Average by Status\n")
+            // adding it to the total count
+            totalDurationByStatusTypeMap[k] += v
 
-        for k, v := range totalDurationMap {
-            percent := v / float64(wipMonthly - directResolvedIssues)
-            fmt.Printf("- %v: %.2f%%", k, percent)
-            if containsStatus(boardCfg.IdleStatus, k) {
-                totalIdle += percent
-                fmt.Printf(" (Idle)\n")
-            } else {
-                fmt.Printf("\n")
+            // print details if in debug mode
+            if parameters.Debug {
+                fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
             }
         }
 
-        if totalIdle > 0 {
-            fmt.Printf("- Idle Total: %.2f%%\n", totalIdle)
+        // print status transition details by issue if in debug Mode
+        if parameters.DebugVerbose {
+            fmt.Print("\n>Status Transition Details\n")   
+            for k, v := range issueDurationByStatusMap {    
+                statusPercent := float64(v * 100) / float64(issueTotalDuration)
+                fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
+            }
         }
     }
+
+    fmt.Printf("\n> Average by Status\n")
+    for k, v := range totalDurationByStatusTypeMap {
+        statusPercent := float64(v * 100) / float64(totalDuration) 
+        fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
+    }
+
+    weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
     fmt.Printf("\n> Throughput\n")
     fmt.Printf("Monthly: %v tasks delivered\n", throughtputMonthly)
@@ -332,11 +292,11 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     fmt.Printf("\n> WIP\n")
     fmt.Printf("Monthly: %v tasks\n", wipMonthly)
-    if wipDays > 0 {
-        fmt.Printf("Average: %.2f tasks\n", float64(wipDays) / float64(weekDays))
+    if totalWipDays > 0 {
+        fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays) / float64(weekDays))
     }
 
-    fmt.Printf("\n> Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+    fmt.Printf("\n> Lead time: %.2f days\n", float64(totalWipDays) / float64(throughtputMonthly))
 }
 
 func main() {
@@ -368,35 +328,4 @@ func printDebugIssueTransition (isDebug bool, statusChangeTime time.Time, status
         fmt.Printf("Debug [%v] - [%v] = [%v] \n\n", formatBrDateWithTime(statusChangeTime), formatBrDateWithTime(statusChangeTimeStart), statusChangeDuration)
     }
 }
-
-func printDurationInDays (isDebug bool, statusChangeDuration time.Duration) string {
-
-    if isDebug {
-    
-        // Calculating days, hours and minutes of this status transition
-        statusChangeDurationDays := int(statusChangeDuration.Hours())/int(24)
-        // statusChangeDurationHours := int(statusChangeDuration.Hours() - float64(statusChangeDurationDays*int(24)))
-        // statusChangeDurationMinutes := int(statusChangeDuration.Minutes()- float64((statusChangeDurationDays*24*60)+(statusChangeDurationHours*int(60))))
-        returnString := "" + strconv.Itoa(statusChangeDurationDays) + "d "
-         // + statusChangeDurationHours+ "h" + statusChangeDurationMinutes + "m"
-        return returnString 
-    }
-
-    return ""
-}
-
-
-func subDatesRemovingWeekends (isDebug bool, start time.Time, end time.Time) time.Duration {
-    statusChangeDuration := end.Sub(start) 
-    weekendDaysBetweenDates := countWeekendDays(start, end)
-    if (weekendDaysBetweenDates > 0) {
-        updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)    
-        statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
-        if isDebug {
-            fmt.Printf(TERM_COLOR_RED + "Removing weekend days [%v] \n" + TERM_COLOR_WHITE, weekendDaysBetweenDates)
-        }
-    }
-    return statusChangeDuration
-}
-
 
