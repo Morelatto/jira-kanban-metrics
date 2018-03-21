@@ -22,6 +22,7 @@ import (
     "os"
     "fmt"
     "time"
+    "sort"
 )
 
 func processCommandLineParameters() CLParameters {
@@ -38,10 +39,15 @@ func processCommandLineParameters() CLParameters {
     parameters.EndDate = parseDate(os.Args[3])
     parameters.JiraUrl = os.Args[4]
     parameters.Debug = false
+    parameters.DebugVerbose = false
 
     if len(os.Args) == 6 {
-        if os.Args[5] == "--debug" {
+        debugMethod := os.Args[5]
+        if debugMethod == "--debug" {
             parameters.Debug = true
+        } else if debugMethod == "--debug--verbose" {
+            parameters.Debug = true
+            parameters.DebugVerbose = true
         }
     }
 
@@ -49,7 +55,7 @@ func processCommandLineParameters() CLParameters {
 }
 
 func extractMonthlyThroughput(parameters CLParameters, auth Auth, boardCfg BoardCfg) int {
-    troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO %v DURING('%v', '%v')", 
+    troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO %v DURING('%v', '%v')",
                                    boardCfg.Project, formatColumns(boardCfg.DoneStatus), formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
     if parameters.Debug {
@@ -66,9 +72,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     startDate := formatJiraDate(parameters.StartDate)
     endDate := formatJiraDate(parameters.EndDate)
 
-    wipSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status WAS IN (%v) " + 
-                             "DURING('%v', '%v') or status CHANGED TO %v DURING('%v', '%v'))", 
-                             boardCfg.Project, formatColumns(boardCfg.WipStatus), startDate, endDate, formatColumns(boardCfg.DoneStatus), startDate, endDate)
+    wipSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic " +
+                             "AND (status CHANGED TO %v DURING('%v', '%v'))",
+                             boardCfg.Project,
+                             formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
     if parameters.Debug {
         fmt.Printf(TERM_COLOR_BLUE + "WIP JQL: " + TERM_COLOR_WHITE + "%v\n\n", wipSearch)
@@ -80,218 +87,248 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     // Add one day to end date limit to include it in time comparisons
     parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
 
-    var wipDays int = 0 // Absolute number of WIP days of all issues during the specified period
-    var directResolvedIssues int = 0 // Absolute number of direct resolved issues (from OPEN to DONE)
+    var totalWipDays int = 0 // Absolute number of WIP days of all issues during the specified period
     var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
-    var totalDurationMap map[string]float64 = make(map[string]float64) // Total duration [value] by status [key] of all issues
+
+    var totalDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
+    var totalDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
+    var totalDuration time.Duration // Total duration of all issues processed by the script (All status)
+    var wipDuration time.Duration // WIP duration of all issues (WIP/Idle)
+
+    var issueDetailsMap map[string]IssueDetails = make(map[string]IssueDetails)
+    var issueDetailsMapByType map[string][]IssueDetails = make(map[string][]IssueDetails)
 
     // Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
     for _, issue := range result.Issues {
 
-        var wipTransitionDate time.Time
-        var doneTransitionDate time.Time = parameters.EndDate
-
+        var issueDetails IssueDetails
         var resolved bool = false
-        var ignoreIssue bool = false
-
-        var durationMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
-        var statusChangeMap map[string]time.Time = make(map[string]time.Time) // Maps when a transition to status [key] happened
-
         var epicLink string
 
+        var durationByStatusMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
+        var issueDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
+        var issueDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
+
+        var lastToStatus string
+        var transitionToWipDate time.Time
+
+        var issueCreatedDate time.Time = parseJiraTime(issue.Fields.Created)
+        var lastFromStatusCreationDate time.Time = issueCreatedDate
+
+        if parameters.DebugVerbose {
+            fmt.Printf(TERM_COLOR_YELLOW + "\nIssue Jira: %v | VERBOSE DEBUG START \n", issue.Key)
+        }
+
         for _, history := range issue.Changelog.Histories {
-            
+
             for _, item := range history.Items {
-                
+
                 if item.Field == "status" {
 
                     // Timestamp when the transition happened
                     statusChangeTime := parseJiraTime(history.Created)
 
-                    if (containsStatus(boardCfg.WipStatus, item.Tostring)) {
-                        _, ok := statusChangeMap[item.Tostring]
-                        if ok {
-                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition TO issue %v happened twice before a corresponding FROM transition was found, ignoring transition\n" + TERM_COLOR_WHITE, 
-                                issue.Key, item.Tostring)
-                            continue
-                        }
-                        if statusChangeTime.Before(parameters.StartDate) {
-                            statusChangeMap[item.Tostring] = parameters.StartDate
-                        } else if statusChangeTime.After(parameters.EndDate) {
-                            statusChangeMap[item.Tostring] = parameters.EndDate
-                        } else {
-                            statusChangeMap[item.Tostring] = statusChangeTime
+                    // Mapping var to calculate total WIP of the issue
+                    if (transitionToWipDate.IsZero() && (
+                        containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.IdleStatus, item.Tostring))) {
+                        transitionToWipDate = statusChangeTime;
+                    }
+
+                    // Ignore transitions to the same status
+                    if (item.Fromstring == item.Tostring) {
+                        continue
+                    }
+
+                    // Calculating status transition duration
+                    statusChangeDuration := statusChangeTime.Sub(lastFromStatusCreationDate)
+                    weekendDaysBetweenDates := countWeekendDays(lastFromStatusCreationDate, statusChangeTime)
+                    if (weekendDaysBetweenDates > 0) {
+                        updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)
+                        statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
+                        if parameters.DebugVerbose {
+                            fmt.Printf(TERM_COLOR_RED + "Removing weekend days [%v] from Status [%v] \n" + TERM_COLOR_YELLOW, weekendDaysBetweenDates, item.Fromstring)
                         }
                     }
 
-                    if (containsStatus(boardCfg.WipStatus, item.Fromstring)) {
-                        fromDate := parameters.EndDate
-                        toDate, ok := statusChangeMap[item.Fromstring]
-                        if !ok {
-                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition FROM issue %v doesn't have a corresponding TO transition\n" + TERM_COLOR_WHITE,
-                                issue.Key, item.Fromstring)
-                            continue
-                        }
-                        delete(statusChangeMap, item.Fromstring)
-                        if !statusChangeTime.Before(parameters.StartDate) {
-                            if !statusChangeTime.After(parameters.EndDate) {
-                                fromDate = statusChangeTime
-                            }
-                            duration := int64(fromDate.Sub(toDate))
-                            durationMap[item.Fromstring] += duration
-                        }
+                    if parameters.DebugVerbose {
+                        printDebugIssueTransition (parameters.DebugVerbose, statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring)
                     }
 
-                    // Transition from OPEN to WIP
-                    if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.WipStatus, item.Tostring)) {
-                        if (statusChangeTime.After(parameters.EndDate)) {
-                            fmt.Printf(TERM_COLOR_RED + "Issue %v - Transition to WIP happened after end date: %v, ignoring issue\n" + TERM_COLOR_WHITE, issue.Key, statusChangeTime)
-                            ignoreIssue = true
-                        }
+                    // Group total minutes by status, considering this status transition
+                    durationByStatusMap[item.Fromstring] = durationByStatusMap[item.Fromstring] + int64(statusChangeDuration.Minutes())
+                    issueDurationByStatusMap[item.Fromstring] = issueDurationByStatusMap[item.Fromstring] + statusChangeDuration
 
-                        wipTransitionDate = statusChangeTime
-                        doneTransitionDate = parameters.EndDate
-                        resolved = false
+                    // Update vars for next interation
+                    lastToStatus = item.Tostring
+                    lastFromStatusCreationDate = statusChangeTime
 
-                        if wipTransitionDate.Before(parameters.StartDate) {
-                            wipTransitionDate = parameters.StartDate
-                        }
-                    }
-
-                    // Transition from WIP to DONE
-                    if (containsStatus(boardCfg.WipStatus, item.Fromstring) && containsStatus(boardCfg.DoneStatus, item.Tostring)) {
-                        doneTransitionDate = parameters.EndDate
-
-                        // If the transition happened during the period, the task is resolved
-                        if statusChangeTime.Before(parameters.EndDate) || statusChangeTime.Equal(parameters.EndDate) {
-                            doneTransitionDate = statusChangeTime
-                            resolved = true
-                        }
-                    }
-
-                    // Transition from WIP to OPEN
-                    if (containsStatus(boardCfg.WipStatus, item.Fromstring) && containsStatus(boardCfg.OpenStatus, item.Tostring)) {
-                        doneTransitionDate = parameters.EndDate
-
-                        if statusChangeTime.Before(parameters.EndDate) || statusChangeTime.Equal(parameters.EndDate) {
-                            doneTransitionDate = statusChangeTime
-                        }
-                    }
-
-                    // Transition from OPEN to DONE
-                    if (containsStatus(boardCfg.OpenStatus, item.Fromstring) && containsStatus(boardCfg.DoneStatus, item.Tostring)) {
-                        wipTransitionDate = statusChangeTime
-                        doneTransitionDate = statusChangeTime
-                        directResolvedIssues++
-                        resolved = true
-
-                        if wipTransitionDate.Before(parameters.StartDate) {
-                            wipTransitionDate = parameters.StartDate
-                        }
-                        if doneTransitionDate.After(parameters.EndDate) {
-                            doneTransitionDate = parameters.EndDate
-                        }
-                    }
-
-                    // Log debug the transition
-                    if parameters.Debug {
-                        fmt.Printf("%v -> %v (%v)\n", item.Fromstring, item.Tostring, formatJiraDate(statusChangeTime))
-                    }
-                
                 } else if item.Field == "Epic Link" {
                     epicLink = item.Tostring
                 }
-
             }
         }
 
-        // Count duration of last transition until the end of the specified period
-        if len(statusChangeMap) == 1 {
-            for status, toDate := range statusChangeMap {
-                fromDate := parameters.EndDate
-                duration := int64(fromDate.Sub(toDate))
-                durationMap[status] += duration
+        // Calculate the duration of the last transition, if it's not done
+        if (lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus)) {
+            statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
+
+            // Group total minutes by status, considering this status transition
+            durationByStatusMap[lastToStatus] = durationByStatusMap[lastToStatus] + int64(statusChangeDuration.Minutes())
+            issueDurationByStatusMap[lastToStatus] = issueDurationByStatusMap[lastToStatus] + statusChangeDuration
+
+            // Print debug
+            if parameters.Debug {
+                fmt.Printf(TERM_COLOR_RED + "Status current in development, considering endDate [%v] \n" + TERM_COLOR_WHITE, formatBrDateWithTime(parameters.EndDate))
             }
 
-        } else if len(statusChangeMap) > 1 {
-            fmt.Printf(TERM_COLOR_RED + "Issue %v - Status change map state is inconsistent: %v\n" + TERM_COLOR_WHITE, issue.Key, statusChangeMap)
+            printDebugIssueTransition (parameters.DebugVerbose, parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None")
         }
 
-        if ignoreIssue {
-            wipMonthly--
-            continue
+        // Calculate the duration of all status
+        if parameters.Debug {
+            fmt.Printf(TERM_COLOR_BLUE + "\nIssue Jira: %v\n" + TERM_COLOR_WHITE, issue.Key)
         }
 
+        var issueTotalDuration time.Duration
+        var statusType string
 
-        if (wipTransitionDate.IsZero()) {
-            fmt.Printf(TERM_COLOR_RED + "Issue %v - No transition date to WIP found\n" + TERM_COLOR_WHITE, issue.Key)
-            continue
+        for k, v := range issueDurationByStatusMap {
+            if (containsStatus(boardCfg.OpenStatus, k)) {
+                statusType = "Open";
+            } else if (containsStatus(boardCfg.WipStatus, k)) {
+                statusType = "Wip";
+            } else if (containsStatus(boardCfg.IdleStatus, k)) {
+                statusType = "Idle";
+            } else if (containsStatus(boardCfg.DoneStatus, k)) {
+                statusType = "Done";
+            } else {
+                fmt.Printf("Status %v not mapped in board.cfg, please update it.\n", k)
+                continue
+            }
+
+            totalDuration += v
+
+            // Adding it to the total count only if in WIP/Idle
+            if (statusType == "Wip" || statusType == "Idle") {
+                wipDuration += v
+                issueTotalDuration += v
+                totalDurationByStatusMap[k] += v
+             }
+
+            if parameters.Debug {
+                fmt.Printf("Status [%v] time in [%v] \n", k, v)
+            }
+
+            issueDurationByStatusTypeMap[statusType] = issueDurationByStatusTypeMap[statusType] + v
+        }
+
+        // Calculating WIP days
+        issueDurationTotalWip := issueDurationByStatusTypeMap["Wip"] + issueDurationByStatusTypeMap["Idle"]
+        issueWipDays := int(issueDurationTotalWip.Hours()) / 24
+        if (issueWipDays == 0) {
+            issueWipDays = 1
+        }
+        totalWipDays += issueWipDays
+
+        // Verify if the last transition is to a resolved status
+        if (containsStatus(boardCfg.DoneStatus, lastToStatus)) {
+            resolved = true
+
+            // Double check if the wip is being calculated correct, it's not used for anything else
+            issueTotalWip := subtractDatesRemovingWeekends(transitionToWipDate, lastFromStatusCreationDate)
+            wipDiffBetweenCalcMethods := issueDurationTotalWip-issueTotalWip
+            if (parameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1)) {
+                fmt.Printf(TERM_COLOR_RED + "Issue has some strange status transition. Please check it!!! \n" + TERM_COLOR_WHITE)
+            }
         }
 
         if (resolved) {
             issueTypeMap[issue.Fields.Issuetype.Name]++
         }
 
-        weekendDays := countWeekendDays(wipTransitionDate, doneTransitionDate)
-        issueDaysInWip := round(doneTransitionDate.Sub(wipTransitionDate).Hours() / 24) - weekendDays
+        // Calculating percentage by status type configured in board.cfg
+        for k, v := range issueDurationByStatusTypeMap {
+            statusPercent := float64(v * 100) / float64(issueTotalDuration)
 
-        wipDays += issueDaysInWip
+            // Adding it to the total count
+            totalDurationByStatusTypeMap[k] += v
 
-        periodDuration := int64(doneTransitionDate.Sub(wipTransitionDate))
-        if periodDuration > 0 {
-            var total float64 = 0
-
-            for k, v := range durationMap {
-                periodPercent := float64(v * 100) / float64(periodDuration)
-                if periodPercent >= 0.01 {
-                    if parameters.Debug {
-                        fmt.Printf("%v = %.2f%%\n", k, periodPercent)
-                    }
-                    totalDurationMap[k] += periodPercent
-                    total += periodPercent
-                }
-            }
-
-            if total < 99.9 {
-                fmt.Printf(TERM_COLOR_RED + "Issue %v | Average by status %.2f%% total is less than 100%%\n" + TERM_COLOR_WHITE, issue.Key, total)
+            // Print details if in debug mode
+            if parameters.Debug {
+                fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
             }
         }
 
-        fmt.Printf(TERM_COLOR_BLUE + "Issue: %v | %v | WIP days: %v | Start: %v | End: %v |", 
-            issue.Key, issue.Fields.Summary, issueDaysInWip, formatJiraDate(wipTransitionDate), formatJiraDate(doneTransitionDate))
-
-        if epicLink != "" {
-            fmt.Printf(" Epic link: %v |", epicLink)
+        // Print status transition details by issue if in debug Mode
+        if parameters.DebugVerbose {
+            fmt.Print("\n>Status Transition Details\n")
+            for k, v := range issueDurationByStatusMap {
+                statusPercent := float64(v * 100) / float64(issueTotalDuration)
+                fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
+            }
         }
 
-        if resolved {
-            fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n\n")
-        } else {
-            fmt.Print(TERM_COLOR_WHITE + "\n\n")
+        issueDetails.Name = issue.Key
+        issueDetails.Summary = issue.Fields.Summary
+        issueDetails.StartDate = transitionToWipDate
+        issueDetails.EndDate = lastFromStatusCreationDate
+        issueDetails.WIP = issueWipDays
+        issueDetails.EpicLink = epicLink
+        issueDetails.IssueType = issue.Fields.Issuetype.Name
+        issueDetails.Resolved = resolved
+
+        issueDetailsMap[issueDetails.Name] = issueDetails
+
+        issueArray := issueDetailsMapByType[issueDetails.IssueType]
+        issueArray = append(issueArray, issueDetails)
+        issueDetailsMapByType[issueDetails.IssueType] = issueArray
+    }
+
+    lastType := ""
+    for issueType, issueDetailsArray := range issueDetailsMapByType {
+        if (lastType != issueType) {
+            lastType = issueType
+            fmt.Printf("\n>> %v\n", issueType)
         }
+
+        var wipDays[]float64
+        totalWipDaysByIssueType := 0
+        for _, issueDetails := range issueDetailsArray {
+            fmt.Printf(TERM_COLOR_BLUE + "Issue Jira: %v | %v | Start: %v| End: %v | WIP days: %v | ", issueDetails.Name, issueDetails.Summary,
+            formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate), issueDetails.WIP)
+
+            if issueDetails.EpicLink != "" {
+                fmt.Printf(" Epic link: %v |", issueDetails.EpicLink)
+            }
+
+            if issueDetails.Resolved {
+                fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n")
+            } else {
+                fmt.Print(TERM_COLOR_WHITE + "\n")
+            }
+
+            totalWipDaysByIssueType += issueDetails.WIP
+            wipDays = append(wipDays, float64(issueDetails.WIP))
+        }
+
+        totalWipAverageByIssueType := float64(totalWipDaysByIssueType / len(issueDetailsArray))
+        fmt.Printf("Average lead time: %v\n", totalWipAverageByIssueType)
+        fmt.Printf("Median lead time: %v\n", median(wipDays))
+    }
+
+    fmt.Printf("\n> Average by Status\n")
+    for k, v := range totalDurationByStatusMap {
+        statusPercent := float64(v * 100) / float64(wipDuration)
+        fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
+    }
+
+    fmt.Printf("\n> Average by Status Type\n")
+    for k, v := range totalDurationByStatusTypeMap {
+        statusPercent := float64(v * 100) / float64(totalDuration)
+        fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
     }
 
     weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
-
-    if wipDays > 0 {
-        var totalIdle float64 = 0
-        fmt.Printf("> Average by Status\n")
-
-        for k, v := range totalDurationMap {
-            percent := v / float64(wipMonthly - directResolvedIssues)
-            fmt.Printf("- %v: %.2f%%", k, percent)
-            if containsStatus(boardCfg.IdleStatus, k) {
-                totalIdle += percent
-                fmt.Printf(" (Idle)\n")
-            } else {
-                fmt.Printf("\n")
-            }
-        }
-
-        if totalIdle > 0 {
-            fmt.Printf("- Idle Total: %.2f%%\n", totalIdle)
-        }
-    }
 
     fmt.Printf("\n> Throughput\n")
     fmt.Printf("Monthly: %v tasks delivered\n", throughtputMonthly)
@@ -304,11 +341,16 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     fmt.Printf("\n> WIP\n")
     fmt.Printf("Monthly: %v tasks\n", wipMonthly)
-    if wipDays > 0 {
-        fmt.Printf("Average: %.2f tasks\n", float64(wipDays) / float64(weekDays))
+    if totalWipDays > 0 {
+        fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays) / float64(weekDays))
     }
 
-    fmt.Printf("\n> Lead time: %.2f days\n", float64(wipDays) / float64(throughtputMonthly))
+    fmt.Printf("\n> Lead time: %.2f days\n", float64(totalWipDays) / float64(throughtputMonthly))
+
+    fmt.Printf("\n> Data for scaterplot\n")
+    for _, v := range issueDetailsMap {
+        fmt.Printf("%v;%v;%v;%v;%v;%v\n", v.Name, formatBrDate(v.StartDate), formatBrDate(v.EndDate), v.WIP, v.EpicLink, v.IssueType)
+    }
 }
 
 func main() {
@@ -318,8 +360,32 @@ func main() {
 
     boardCfg := loadBoardCfg()
 
-    fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", 
+    fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n",
         boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
     extractMetrics(parameters, auth, boardCfg)
+}
+
+func printDebugIssueTransition (isDebug bool, statusChangeTime time.Time, statusChangeTimeStart time.Time, statusChangeDuration time.Duration, statusFrom string, statusTo string) {
+
+    if isDebug {
+        // Calculating days, hours and minutes of this status transition
+        statusChangeDurationDays := int(statusChangeDuration.Hours()) / int(24)
+        statusChangeDurationHours := int(statusChangeDuration.Hours() - float64(statusChangeDurationDays * int(24)))
+        statusChangeDurationMinutes := int(statusChangeDuration.Minutes() - float64((statusChangeDurationDays * 24 * 60) + (statusChangeDurationHours * int(60))))
+
+        fmt.Printf("%v -> %v (%v)\n", statusFrom, statusTo, formatBrDateWithTime(statusChangeTime))
+        fmt.Printf("Status [%v] Time in Status [%vd %vh %vm] \n", statusFrom, statusChangeDurationDays, statusChangeDurationHours, statusChangeDurationMinutes)
+        fmt.Printf("Debug [%v] - [%v] = [%v] \n\n", formatBrDateWithTime(statusChangeTime), formatBrDateWithTime(statusChangeTimeStart), statusChangeDuration)
+    }
+}
+
+func median(numbers []float64) float64 {
+    sort.Float64s(numbers)
+    middle := len(numbers) / 2
+    result := numbers[middle]
+    if len(numbers)%2 == 0 {
+        result = (result + numbers[middle-1]) / 2
+    }
+    return result
 }

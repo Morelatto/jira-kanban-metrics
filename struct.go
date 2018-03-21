@@ -10,6 +10,7 @@ type CLParameters struct {
     EndDate time.Time
     JiraUrl string
     Debug bool
+    DebugVerbose bool
 }
 
 type BoardCfg struct {
@@ -18,6 +19,17 @@ type BoardCfg struct {
     WipStatus []string
     IdleStatus []string
     DoneStatus []string
+}
+
+type IssueDetails struct {
+    Name string
+    Summary string
+    StartDate time.Time
+    EndDate time.Time
+    WIP int
+    EpicLink string
+    IssueType string 
+    Resolved bool
 }
 
 type Auth struct {

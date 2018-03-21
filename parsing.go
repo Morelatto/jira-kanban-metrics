@@ -40,6 +40,12 @@ func formatBrDate(date time.Time) string {
     return date.Format(brDateFormat)
 }
 
+func formatBrDateWithTime(date time.Time) string {
+    const brDateFormat = "02/01/2006 15:04"
+
+    return date.Format(brDateFormat)
+}
+
 func stripHours(t time.Time) time.Time {
     return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }

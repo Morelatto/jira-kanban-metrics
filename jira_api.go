@@ -128,6 +128,16 @@ func countWeekendDays(start time.Time, end time.Time) int {
         return weekendDays
 }
 
+func subtractDatesRemovingWeekends (start time.Time, end time.Time) time.Duration {
+    statusChangeDuration := end.Sub(start) 
+    weekendDaysBetweenDates := countWeekendDays(start, end)
+    if (weekendDaysBetweenDates > 0) {
+        updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)    
+        statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
+    }
+    return statusChangeDuration
+}
+
 func formatColumns(columns []string) string {
     str := ""
 
