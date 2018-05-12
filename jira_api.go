@@ -117,6 +117,10 @@ func countWeekDays(start time.Time, end time.Time) int {
 func countWeekendDays(start time.Time, end time.Time) int {
         var weekendDays int = 0
 
+        if (start.IsZero()) {
+            return -1;
+        }
+
         dateIndex := start
         for dateIndex.Before(end) || dateIndex.Equal(end) {
             if dateIndex.Weekday() == time.Saturday || dateIndex.Weekday() == time.Sunday {
