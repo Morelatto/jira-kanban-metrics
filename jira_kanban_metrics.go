@@ -23,6 +23,7 @@ import (
     "fmt"
     "time"
     "sort"
+    "math"
 )
 
 func processCommandLineParameters() CLParameters {
@@ -89,6 +90,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     var totalWipDays int = 0 // Absolute number of WIP days of all issues during the specified period
     var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
+    var issueTypeLeadTimeMap map[string]float64 = make(map[string]float64) // Number of issues by type [key]
+    var issueTypeConfidenceMap map[string]float64 = make(map[string]float64) // Number of issues by type [key]
 
     var totalDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
     var totalDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
@@ -206,20 +209,20 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                 continue
             }
 
-            totalDuration += v
-
             // Adding it to the total count only if in WIP/Idle
             if (statusType == "Wip" || statusType == "Idle") {
                 wipDuration += v
                 issueTotalDuration += v
                 totalDurationByStatusMap[k] += v
+             
+
+                issueDurationByStatusTypeMap[statusType] = issueDurationByStatusTypeMap[statusType] + v
+                totalDuration += v
              }
 
             if parameters.Debug {
                 fmt.Printf("Status [%v] time in [%v] \n", k, v)
             }
-
-            issueDurationByStatusTypeMap[statusType] = issueDurationByStatusTypeMap[statusType] + v
         }
 
         // Calculating WIP days
@@ -311,9 +314,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             wipDays = append(wipDays, float64(issueDetails.WIP))
         }
 
-        totalWipAverageByIssueType := float64(totalWipDaysByIssueType / len(issueDetailsArray))
-        fmt.Printf("Average lead time: %v\n", totalWipAverageByIssueType)
+        totalWipAverageByIssueType := float64(totalWipDaysByIssueType) / float64(len(issueDetailsArray))
+        issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType
+        issueTypeConfidenceMap[issueType] = confidence90(wipDays)
+
+        fmt.Printf("Average lead time: %v\n", math.Ceil(totalWipAverageByIssueType))
         fmt.Printf("Median lead time: %v\n", median(wipDays))
+        fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
     }
 
     fmt.Printf("\n> Average by Status\n")
@@ -330,26 +337,44 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 
-    fmt.Printf("\n> Throughput\n")
-    fmt.Printf("Monthly: %v tasks delivered\n", throughtputMonthly)
-    fmt.Printf("Weekly: %.2f tasks\n", float64(throughtputMonthly) / float64(4))
-    fmt.Printf("Daily: %.2f tasks\n", float64(throughtputMonthly) / float64(weekDays))
-    fmt.Printf("By issue type:\n")
-    for key, value := range issueTypeMap {
-        fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, ((value * 100) / throughtputMonthly))
-    }
-
     fmt.Printf("\n> WIP\n")
     fmt.Printf("Monthly: %v tasks\n", wipMonthly)
     if totalWipDays > 0 {
         fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays) / float64(weekDays))
     }
 
-    fmt.Printf("\n> Lead time: %.2f days\n", float64(totalWipDays) / float64(throughtputMonthly))
+    fmt.Printf("\n> Throughput\n")
+    fmt.Printf("Total: %v tasks delivered\n", throughtputMonthly)
+    fmt.Printf("By issue type:\n")
+    for key, value := range issueTypeMap {
+        fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, ((value * 100) / throughtputMonthly))
+    }
 
+    fmt.Printf("\n> Lead time\n")
+    fmt.Printf("Total: %v days\n", math.Ceil(float64(totalWipDays) / float64(throughtputMonthly)))
+    fmt.Printf("By issue type:\n")
+    for issueType, leadTime := range issueTypeLeadTimeMap {
+        fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Ceil(leadTime), math.Ceil(issueTypeConfidenceMap[issueType])) 
+    }
+    
     fmt.Printf("\n> Data for scaterplot\n")
-    for _, v := range issueDetailsMap {
-        fmt.Printf("%v;%v;%v;%v;%v;%v\n", v.Name, formatBrDate(v.StartDate), formatBrDate(v.EndDate), v.WIP, v.EpicLink, v.IssueType)
+    for issueType, _ := range issueTypeMap {
+        fmt.Printf(">> %v\n", issueType)     
+        for _, v := range issueDetailsMap {   
+            if (v.IssueType == issueType) {
+
+                var outlier = "" 
+                if (v.WIP > int(math.Floor(issueTypeConfidenceMap[issueType]))) {
+                    outlier = "Outlier"
+                }
+
+                // fmt.Printf("%v;%v;%v;%v;%v;\n", v.Name, formatBrDate(v.StartDate), formatBrDate(v.EndDate), v.WIP, v.EpicLink)        
+                fmt.Printf("%v;%v;%v;%v;%v\n", formatBrDate(v.EndDate), v.WIP, v.Name, v.EpicLink, outlier)        
+            }                        
+        }   
+
+
+        fmt.Printf("\n")
     }
 }
 
@@ -388,4 +413,36 @@ func median(numbers []float64) float64 {
         result = (result + numbers[middle-1]) / 2
     }
     return result
+}
+
+
+func average (values []float64) float64 {
+    total := float64(0)
+    for _,value := range values {   
+        total += float64(value)
+    }
+    median := total / float64(len(values))
+    return median;  
+}
+
+func variation(values []float64, median float64) float64 {
+    total := float64(0)
+    for _,value := range values {   
+        diff := value - median
+        total += math.Pow(diff, 2)
+
+    }
+    return total / float64((len(values) - 1));  
+}
+
+func confidence(median float64, standarDeviation float64) float64 {
+    return median + (1.644854 * standarDeviation)
+}
+
+func confidence90(values []float64) float64 {
+    average := average (values);
+    variation := variation (values, average);
+    standardDeviation := math.Sqrt(variation);
+    confidence := confidence (average, standardDeviation);
+    return confidence;
 }
