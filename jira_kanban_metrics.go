@@ -318,7 +318,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType
         issueTypeConfidenceMap[issueType] = confidence90(wipDays)
 
-        fmt.Printf("Average lead time: %v\n", math.Ceil(totalWipAverageByIssueType))
+        fmt.Printf("Average lead time: %v\n", math.Round(totalWipAverageByIssueType))
         fmt.Printf("Median lead time: %v\n", median(wipDays))
         fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
     }
@@ -351,10 +351,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     }
 
     fmt.Printf("\n> Lead time\n")
-    fmt.Printf("Total: %v days\n", math.Ceil(float64(totalWipDays) / float64(throughtputMonthly)))
+    fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays) / float64(throughtputMonthly)))
     fmt.Printf("By issue type:\n")
     for issueType, leadTime := range issueTypeLeadTimeMap {
-        fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Ceil(leadTime), math.Ceil(issueTypeConfidenceMap[issueType])) 
+        fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Round(leadTime), math.Round(issueTypeConfidenceMap[issueType])) 
     }
     
     fmt.Printf("\n> Data for scaterplot\n")
@@ -364,7 +364,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
             if (v.IssueType == issueType) {
 
                 var outlier = "" 
-                if (v.WIP > int(math.Floor(issueTypeConfidenceMap[issueType]))) {
+                if (v.WIP > int(math.Round(issueTypeConfidenceMap[issueType]))) {
                     outlier = "Outlier"
                 }
 
