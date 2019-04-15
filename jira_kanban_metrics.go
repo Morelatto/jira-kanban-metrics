@@ -56,7 +56,7 @@ func processCommandLineParameters() CLParameters {
 }
 
 func extractMonthlyThroughput(parameters CLParameters, auth Auth, boardCfg BoardCfg) int {
-    troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO %v DURING('%v', '%v')",
+    troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO (%v) DURING('%v', '%v')",
                                    boardCfg.Project, formatColumns(boardCfg.DoneStatus), formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
     if parameters.Debug {
@@ -74,7 +74,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     endDate := formatJiraDate(parameters.EndDate)
 
     wipSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic " +
-                             "AND (status CHANGED TO %v DURING('%v', '%v'))",
+                             "AND (status CHANGED TO (%v) DURING('%v', '%v'))",
                              boardCfg.Project,
                              formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
