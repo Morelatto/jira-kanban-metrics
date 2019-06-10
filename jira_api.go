@@ -1,16 +1,16 @@
 package main
 
 import (
-    "time"
     "bytes"
-    "strings"
-    "strconv"
+    "crypto/tls"
+    "encoding/json"
     "io/ioutil"
     "net/http"
     "net/url"
-    "crypto/tls"
-    "encoding/json"
     "speakeasy"
+    "strconv"
+    "strings"
+    "time"
 )
 
 func authenticate(username string, jiraUrl string) Auth {
@@ -55,7 +55,7 @@ func httpGet(url string, auth Auth, insecure bool) []byte {
 
     var client http.Client
 
-    if (insecure) {
+    if insecure {
         tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
         client = http.Client{Transport: tr}
     } else {
@@ -101,7 +101,7 @@ func getIssue(issueId int, jiraUrl string, auth Auth) Issue {
 }
 
 func countWeekDays(start time.Time, end time.Time) int {
-        var weekDays int = 0
+        var weekDays = 0
 
         dateIndex := start
         for dateIndex.Before(end) || dateIndex.Equal(end) {
@@ -115,10 +115,10 @@ func countWeekDays(start time.Time, end time.Time) int {
 }
 
 func countWeekendDays(start time.Time, end time.Time) int {
-        var weekendDays int = 0
+        var weekendDays = 0
 
-        if (start.IsZero()) {
-            return -1;
+        if start.IsZero() {
+            return -1
         }
 
         dateIndex := start
@@ -135,7 +135,7 @@ func countWeekendDays(start time.Time, end time.Time) int {
 func subtractDatesRemovingWeekends (start time.Time, end time.Time) time.Duration {
     statusChangeDuration := end.Sub(start) 
     weekendDaysBetweenDates := countWeekendDays(start, end)
-    if (weekendDaysBetweenDates > 0) {
+    if weekendDaysBetweenDates > 0 {
         updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)    
         statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
     }
@@ -147,7 +147,7 @@ func formatColumns(columns []string) string {
 
     for index, col := range columns {
         str += "'" + col + "'"
-        if (index < len(columns) - 1) {
+        if index < len(columns) - 1 {
             str += ","
         }
     }

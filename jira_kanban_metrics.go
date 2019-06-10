@@ -19,11 +19,11 @@
 package main
 
 import (
-    "os"
     "fmt"
-    "time"
-    "sort"
     "math"
+    "os"
+    "sort"
+    "time"
 )
 
 func processCommandLineParameters() CLParameters {
@@ -88,35 +88,35 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     // Add one day to end date limit to include it in time comparisons
     parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
 
-    var totalWipDays int = 0 // Absolute number of WIP days of all issues during the specified period
-    var issueTypeMap map[string]int = make(map[string]int) // Number of issues by type [key]
-    var issueTypeLeadTimeMap map[string]float64 = make(map[string]float64) // Number of issues by type [key]
-    var issueTypeConfidenceMap map[string]float64 = make(map[string]float64) // Number of issues by type [key]
+    var totalWipDays = 0                                  // Absolute number of WIP days of all issues during the specified period
+    var issueTypeMap = make(map[string]int)               // Number of issues by type [key]
+    var issueTypeLeadTimeMap = make(map[string]float64)   // Number of issues by type [key]
+    var issueTypeConfidenceMap = make(map[string]float64) // Number of issues by type [key]
 
-    var totalDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
-    var totalDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration) // Duration by status type
-    var totalDuration time.Duration // Total duration of all issues processed by the script (All status)
-    var wipDuration time.Duration // WIP duration of all issues (WIP/Idle)
+    var totalDurationByStatusMap = make(map[string]time.Duration)     // Duration by status type
+    var totalDurationByStatusTypeMap = make(map[string]time.Duration) // Duration by status type
+    var totalDuration time.Duration                                   // Total duration of all issues processed by the script (All status)
+    var wipDuration time.Duration                                     // WIP duration of all issues (WIP/Idle)
 
-    var issueDetailsMap map[string]IssueDetails = make(map[string]IssueDetails)
-    var issueDetailsMapByType map[string][]IssueDetails = make(map[string][]IssueDetails)
+    var issueDetailsMap = make(map[string]IssueDetails)
+    var issueDetailsMapByType = make(map[string][]IssueDetails)
 
     // Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
     for _, issue := range result.Issues {
 
         var issueDetails IssueDetails
-        var resolved bool = false
+        var resolved = false
         var epicLink string
 
-        var durationByStatusMap map[string]int64 = make(map[string]int64)  // Total duration [value] by status [key]
-        var issueDurationByStatusMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
-        var issueDurationByStatusTypeMap map[string]time.Duration = make(map[string]time.Duration)  // Total duration [value] by status [key]
+        var durationByStatusMap = make(map[string]int64)                  // Total duration [value] by status [key]
+        var issueDurationByStatusMap = make(map[string]time.Duration)     // Total duration [value] by status [key]
+        var issueDurationByStatusTypeMap = make(map[string]time.Duration) // Total duration [value] by status [key]
 
         var lastToStatus string
         var transitionToWipDate time.Time
 
-        var issueCreatedDate time.Time = parseJiraTime(issue.Fields.Created)
-        var lastFromStatusCreationDate time.Time = issueCreatedDate
+        var issueCreatedDate = parseJiraTime(issue.Fields.Created)
+        var lastFromStatusCreationDate = issueCreatedDate
 
         if parameters.DebugVerbose {
             fmt.Printf(TERM_COLOR_YELLOW + "\nIssue Jira: %v | VERBOSE DEBUG START \n", issue.Key)
@@ -132,20 +132,20 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
                     statusChangeTime := parseJiraTime(history.Created)
 
                     // Mapping var to calculate total WIP of the issue
-                    if (transitionToWipDate.IsZero() && (
-                        containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.IdleStatus, item.Tostring))) {
-                        transitionToWipDate = statusChangeTime;
+                    if transitionToWipDate.IsZero() && (
+                                            containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.IdleStatus, item.Tostring)) {
+                        transitionToWipDate = statusChangeTime
                     }
 
                     // Ignore transitions to the same status
-                    if (item.Fromstring == item.Tostring) {
+                    if item.Fromstring == item.Tostring {
                         continue
                     }
 
                     // Calculating status transition duration
                     statusChangeDuration := statusChangeTime.Sub(lastFromStatusCreationDate)
                     weekendDaysBetweenDates := countWeekendDays(lastFromStatusCreationDate, statusChangeTime)
-                    if (weekendDaysBetweenDates > 0) {
+                    if weekendDaysBetweenDates > 0 {
                         updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60 * 60 * 24 * weekendDaysBetweenDates)
                         statusChangeDuration = time.Duration(updatedTotalSeconds)*time.Second
                         if parameters.DebugVerbose {
@@ -172,7 +172,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         }
 
         // Calculate the duration of the last transition, if it's not done
-        if (lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus)) {
+        if lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus) {
             statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
 
             // Group total minutes by status, considering this status transition
@@ -196,21 +196,21 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         var statusType string
 
         for k, v := range issueDurationByStatusMap {
-            if (containsStatus(boardCfg.OpenStatus, k)) {
-                statusType = "Open";
-            } else if (containsStatus(boardCfg.WipStatus, k)) {
-                statusType = "Wip";
-            } else if (containsStatus(boardCfg.IdleStatus, k)) {
-                statusType = "Idle";
-            } else if (containsStatus(boardCfg.DoneStatus, k)) {
-                statusType = "Done";
+            if containsStatus(boardCfg.OpenStatus, k) {
+                statusType = "Open"
+            } else if containsStatus(boardCfg.WipStatus, k) {
+                statusType = "Wip"
+            } else if containsStatus(boardCfg.IdleStatus, k) {
+                statusType = "Idle"
+            } else if containsStatus(boardCfg.DoneStatus, k) {
+                statusType = "Done"
             } else {
                 fmt.Printf("Status %v not mapped in board.cfg, please update it.\n", k)
                 continue
             }
 
             // Adding it to the total count only if in WIP/Idle
-            if (statusType == "Wip" || statusType == "Idle") {
+            if statusType == "Wip" || statusType == "Idle" {
                 wipDuration += v
                 issueTotalDuration += v
                 totalDurationByStatusMap[k] += v
@@ -228,24 +228,24 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
         // Calculating WIP days
         issueDurationTotalWip := issueDurationByStatusTypeMap["Wip"] + issueDurationByStatusTypeMap["Idle"]
         issueWipDays := int(issueDurationTotalWip.Hours()) / 24
-        if (issueWipDays == 0) {
+        if issueWipDays == 0 {
             issueWipDays = 1
         }
         totalWipDays += issueWipDays
 
         // Verify if the last transition is to a resolved status
-        if (containsStatus(boardCfg.DoneStatus, lastToStatus)) {
+        if containsStatus(boardCfg.DoneStatus, lastToStatus) {
             resolved = true
 
             // Double check if the wip is being calculated correct, it's not used for anything else
             issueTotalWip := subtractDatesRemovingWeekends(transitionToWipDate, lastFromStatusCreationDate)
             wipDiffBetweenCalcMethods := issueDurationTotalWip-issueTotalWip
-            if (parameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1)) {
+            if parameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1) {
                 fmt.Printf(TERM_COLOR_RED + "Issue has some strange status transition. Please check it!!! \n" + TERM_COLOR_WHITE)
             }
         }
 
-        if (resolved) {
+        if resolved {
             issueTypeMap[issue.Fields.Issuetype.Name]++
         }
 
@@ -289,7 +289,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
     lastType := ""
     for issueType, issueDetailsArray := range issueDetailsMapByType {
-        if (lastType != issueType) {
+        if lastType != issueType {
             lastType = issueType
             fmt.Printf("\n>> %v\n", issueType)
         }
@@ -347,7 +347,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     fmt.Printf("Total: %v tasks delivered\n", throughtputMonthly)
     fmt.Printf("By issue type:\n")
     for key, value := range issueTypeMap {
-        fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, ((value * 100) / throughtputMonthly))
+        fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, (value * 100) / throughtputMonthly)
     }
 
     fmt.Printf("\n> Lead time\n")
@@ -358,13 +358,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
     }
     
     fmt.Printf("\n> Data for scaterplot\n")
-    for issueType, _ := range issueTypeMap {
+    for issueType := range issueTypeMap {
         fmt.Printf(">> %v\n", issueType)     
         for _, v := range issueDetailsMap {   
-            if (v.IssueType == issueType) {
+            if v.IssueType == issueType {
 
                 var outlier = "" 
-                if (v.WIP > int(math.Round(issueTypeConfidenceMap[issueType]))) {
+                if v.WIP > int(math.Round(issueTypeConfidenceMap[issueType])) {
                     outlier = "Outlier"
                 }
 
@@ -379,9 +379,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 }
 
 func main() {
-    var parameters CLParameters = processCommandLineParameters()
+    var parameters = processCommandLineParameters()
 
-    var auth Auth = authenticate(parameters.Login, parameters.JiraUrl)
+    var auth = authenticate(parameters.Login, parameters.JiraUrl)
 
     boardCfg := loadBoardCfg()
 
@@ -422,7 +422,7 @@ func average (values []float64) float64 {
         total += float64(value)
     }
     median := total / float64(len(values))
-    return median;  
+    return median
 }
 
 func variation(values []float64, median float64) float64 {
@@ -432,7 +432,7 @@ func variation(values []float64, median float64) float64 {
         total += math.Pow(diff, 2)
 
     }
-    return total / float64((len(values) - 1));  
+    return total / float64(len(values) - 1)
 }
 
 func confidence(median float64, standarDeviation float64) float64 {
@@ -440,9 +440,9 @@ func confidence(median float64, standarDeviation float64) float64 {
 }
 
 func confidence90(values []float64) float64 {
-    average := average (values);
-    variation := variation (values, average);
-    standardDeviation := math.Sqrt(variation);
-    confidence := confidence (average, standardDeviation);
-    return confidence;
+    average := average (values)
+    variation := variation (values, average)
+    standardDeviation := math.Sqrt(variation)
+    confidence := confidence (average, standardDeviation)
+    return confidence
 }
