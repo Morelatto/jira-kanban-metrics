@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -109,6 +108,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var issueDetails IssueDetails
 		var resolved = false
 		var epicLink string
+		var sprint string
 
 		var durationByStatusMap = make(map[string]int64)                  // Total duration [value] by status [key]
 		var issueDurationByStatusMap = make(map[string]time.Duration)     // Total duration [value] by status [key]
@@ -121,26 +121,24 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var lastFromStatusCreationDate = issueCreatedDate
 
 		if parameters.DebugVerbose {
-			fmt.Printf(TERM_COLOR_YELLOW+"\nIssue Jira: %v | VERBOSE DEBUG START \n", issue.Key)
+			fmt.Printf(TERM_COLOR_YELLOW+"\n%v\n", issue.Key)
 		}
 
 		for _, history := range issue.Changelog.Histories {
-
 			for _, item := range history.Items {
+				// Ignore transitions to the same status
+				if item.Fromstring == item.Tostring {
+					continue
+				}
 
 				if item.Field == "status" {
-
 					// Timestamp when the transition happened
 					statusChangeTime := parseJiraTime(history.Created)
 
+					wipStatus := append(boardCfg.WipStatus, boardCfg.IdleStatus...)
 					// Mapping var to calculate total WIP of the issue
-					if transitionToWipDate.IsZero() && (containsStatus(boardCfg.WipStatus, item.Tostring) || containsStatus(boardCfg.IdleStatus, item.Tostring)) {
+					if transitionToWipDate.IsZero() && containsStatus(wipStatus, item.Tostring) {
 						transitionToWipDate = statusChangeTime
-					}
-
-					// Ignore transitions to the same status
-					if item.Fromstring == item.Tostring {
-						continue
 					}
 
 					// Calculating status transition duration
@@ -155,19 +153,21 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					}
 
 					if parameters.DebugVerbose {
-						printDebugIssueTransition(parameters.DebugVerbose, statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring)
+						printIssueTransition(statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring)
 					}
 
 					// Group total minutes by status, considering this status transition
 					durationByStatusMap[item.Fromstring] = durationByStatusMap[item.Fromstring] + int64(statusChangeDuration.Minutes())
 					issueDurationByStatusMap[item.Fromstring] = issueDurationByStatusMap[item.Fromstring] + statusChangeDuration
 
-					// Update vars for next interation
+					// Update vars for next iteration
 					lastToStatus = item.Tostring
 					lastFromStatusCreationDate = statusChangeTime
 
 				} else if item.Field == "Epic Link" {
 					epicLink = item.Tostring
+				} else if item.Field == "Sprint" {
+					sprint = item.Tostring
 				}
 			}
 		}
@@ -185,12 +185,14 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 				fmt.Printf(TERM_COLOR_RED+"Status current in development, considering endDate [%v] \n"+TERM_COLOR_WHITE, formatBrDateWithTime(parameters.EndDate))
 			}
 
-			printDebugIssueTransition(parameters.DebugVerbose, parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None")
+			if parameters.DebugVerbose {
+				printIssueTransition(parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None")
+			}
 		}
 
 		// Calculate the duration of all status
 		if parameters.Debug {
-			fmt.Printf(TERM_COLOR_BLUE+"\nIssue Jira: %v\n"+TERM_COLOR_WHITE, issue.Key)
+			fmt.Printf(TERM_COLOR_BLUE+"\n%v\n"+TERM_COLOR_WHITE, issue.Key)
 		}
 
 		var issueTotalDuration time.Duration
@@ -277,15 +279,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueDetails.EndDate = lastFromStatusCreationDate
 		issueDetails.WIP = issueWipDays
 		issueDetails.EpicLink = epicLink
+		issueDetails.Sprint = sprint
 		issueDetails.IssueType = issue.Fields.Issuetype.Name
 		issueDetails.Resolved = resolved
 		issueDetails.Labels = issue.Fields.Labels
-		if len(issue.Fields.Sprint) > 0 {
-			submatch := regexp.MustCompile("name=([\\w\\s-]+),").FindStringSubmatch(issue.Fields.Sprint[0])
-			if len(submatch) > 1 {
-				issueDetails.Sprint = submatch[1]
-			}
-		}
 
 		issueDetailsMap[issueDetails.Name] = issueDetails
 
@@ -405,18 +402,16 @@ func main() {
 	extractMetrics(parameters, auth, boardCfg)
 }
 
-func printDebugIssueTransition(isDebug bool, statusChangeTime time.Time, statusChangeTimeStart time.Time, statusChangeDuration time.Duration, statusFrom string, statusTo string) {
+func fmtDuration(d time.Duration) string {
+	days := int(d.Hours()) / int(24)
+	hours := int(d.Hours() - float64(days*int(24)))
+	minutes := int(d.Minutes() - float64((days*24*60)+(hours*int(60))))
+	return fmt.Sprintf("%vd %vh %vm", days, hours, minutes)
+}
 
-	if isDebug {
-		// Calculating days, hours and minutes of this status transition
-		statusChangeDurationDays := int(statusChangeDuration.Hours()) / int(24)
-		statusChangeDurationHours := int(statusChangeDuration.Hours() - float64(statusChangeDurationDays*int(24)))
-		statusChangeDurationMinutes := int(statusChangeDuration.Minutes() - float64((statusChangeDurationDays*24*60)+(statusChangeDurationHours*int(60))))
-
-		fmt.Printf("%v -> %v (%v)\n", statusFrom, statusTo, formatBrDateWithTime(statusChangeTime))
-		fmt.Printf("Status [%v] Time in Status [%vd %vh %vm] \n", statusFrom, statusChangeDurationDays, statusChangeDurationHours, statusChangeDurationMinutes)
-		fmt.Printf("Debug [%v] - [%v] = [%v] \n\n", formatBrDateWithTime(statusChangeTime), formatBrDateWithTime(statusChangeTimeStart), statusChangeDuration)
-	}
+func printIssueTransition(statusChangeTime time.Time, statusChangeTimeStart time.Time, statusChangeDuration time.Duration, statusFrom string, statusTo string) {
+	fmt.Printf("%v - %v\n", formatBrDateWithTime(statusChangeTimeStart), formatBrDateWithTime(statusChangeTime))
+	fmt.Printf("[%v] (%v) -> [%v]\n\n", statusFrom, fmtDuration(statusChangeDuration), statusTo)
 }
 
 func median(numbers []float64) float64 {

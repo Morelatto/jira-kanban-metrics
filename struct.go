@@ -139,7 +139,6 @@ type Issue struct {
 		Aggregatetimespent interface{}   `json:"aggregatetimespent"`
 		Workratio          int           `json:"workratio"`
 		Labels             []string      `json:"labels"`
-		Sprint             []string      `json:"customfield_11452"`
 		Components         []interface{} `json:"components"`
 		Reporter           struct {
 			Self         string `json:"self"`
