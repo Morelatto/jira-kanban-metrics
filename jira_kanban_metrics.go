@@ -178,7 +178,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 		// Calculate the duration of all status
 		if parameters.Debug {
-			fmt.Printf(TERM_COLOR_BLUE+"\n%v\n"+TERM_COLOR_WHITE, issue.Key)
+			fmt.Printf(TERM_COLOR_BLUE+"\n%v\n", issue.Key)
 		}
 
 		var issueTotalDuration time.Duration
@@ -279,10 +279,16 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueDetailsMapByType[issueDetails.IssueType] = issueArray
 	}
 
-	printMetrics(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap, totalDurationByStatusMap, wipDuration, totalDurationByStatusTypeMap, totalDuration, parameters, wipMonthly, totalWipDays, throughtputMonthly, issueTypeMap, issueDetailsMap)
+	printIssueDetailsByType(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap, parameters)
+	printAverageByStatus(totalDurationByStatusMap, wipDuration)
+	printAverageByStatusType(totalDurationByStatusTypeMap, totalDuration)
+	printWIP(parameters, wipMonthly, totalWipDays)
+	printThroughput(throughtputMonthly, issueTypeMap)
+	printLeadTime(totalWipDays, throughtputMonthly, issueTypeLeadTimeMap, issueTypeConfidenceMap)
+	printDataForScaterplot(issueTypeMap, issueDetailsMap, issueTypeConfidenceMap)
 }
 
-func printMetrics(issueDetailsMapByType map[string][]IssueDetails, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64, totalDurationByStatusMap map[string]time.Duration, wipDuration time.Duration, totalDurationByStatusTypeMap map[string]time.Duration, totalDuration time.Duration, parameters CLParameters, wipMonthly int, totalWipDays int, throughtputMonthly int, issueTypeMap map[string]int, issueDetailsMap map[string]IssueDetails) {
+func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64, parameters CLParameters) {
 	lastType := ""
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		if lastType != issueType {
@@ -328,34 +334,52 @@ func printMetrics(issueDetailsMapByType map[string][]IssueDetails, issueTypeLead
 			fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
 		}
 	}
+}
+
+func printAverageByStatus(totalDurationByStatusMap map[string]time.Duration, wipDuration time.Duration) {
 	fmt.Printf("\n> Average by Status\n")
 	for k, v := range totalDurationByStatusMap {
 		statusPercent := float64(v*100) / float64(wipDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
 	}
+}
+
+func printAverageByStatusType(totalDurationByStatusTypeMap map[string]time.Duration, totalDuration time.Duration) {
 	fmt.Printf("\n> Average by Status Type\n")
 	for k, v := range totalDurationByStatusTypeMap {
 		statusPercent := float64(v*100) / float64(totalDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
 	}
+}
+
+func printWIP(parameters CLParameters, wipMonthly int, totalWipDays int) {
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
 	fmt.Printf("\n> WIP\n")
 	fmt.Printf("Monthly: %v tasks\n", wipMonthly)
 	if totalWipDays > 0 {
 		fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays)/float64(weekDays))
 	}
+}
+
+func printThroughput(throughtputMonthly int, issueTypeMap map[string]int) {
 	fmt.Printf("\n> Throughput\n")
 	fmt.Printf("Total: %v tasks delivered\n", throughtputMonthly)
 	fmt.Printf("By issue type:\n")
 	for key, value := range issueTypeMap {
 		fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, (value*100)/throughtputMonthly)
 	}
+}
+
+func printLeadTime(totalWipDays int, throughtputMonthly int, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64) {
 	fmt.Printf("\n> Lead time\n")
 	fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays)/float64(throughtputMonthly)))
 	fmt.Printf("By issue type:\n")
 	for issueType, leadTime := range issueTypeLeadTimeMap {
 		fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Round(leadTime), math.Round(issueTypeConfidenceMap[issueType]))
 	}
+}
+
+func printDataForScaterplot(issueTypeMap map[string]int, issueDetailsMap map[string]IssueDetails, issueTypeConfidenceMap map[string]float64) {
 	fmt.Printf("\n> Data for scaterplot\n")
 	for issueType := range issueTypeMap {
 		fmt.Printf(">> %v\n", issueType)
