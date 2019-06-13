@@ -20,6 +20,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/zchee/color" // TODO test colors on windows and terminator
 	"math"
 	"os"
 	"sort"
@@ -62,7 +63,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))", boardCfg.Project, formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
 	if parameters.Debug {
-		fmt.Printf(TERM_COLOR_BLUE+"WIP/Throughput JQL: "+TERM_COLOR_WHITE+"%v\n", jqlSearch)
+		title("WIP/Throughput JQL: %s\n", jqlSearch)
 	}
 
 	result := searchIssues(jqlSearch, parameters.JiraUrl, auth)
@@ -104,7 +105,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var lastFromStatusCreationDate = issueCreatedDate
 
 		if parameters.DebugVerbose {
-			fmt.Printf(TERM_COLOR_YELLOW+"\n%v\n", issue.Key)
+			title("\n%s\n", issue.Key)
 		}
 
 		for _, history := range issue.Changelog.Histories {
@@ -142,7 +143,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			}
 		}
 
-		// Calculate the duration of the last transition, if it's not done
+		// FIXME considers endDate of opened issue as today, is this right?
+		// Calculate the duration of the last transition, if it's not done (current in dev)
 		if lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus) {
 			statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
 
@@ -150,9 +152,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			durationByStatusMap[lastToStatus] = durationByStatusMap[lastToStatus] + int64(statusChangeDuration.Minutes())
 			issueDurationByStatusMap[lastToStatus] = issueDurationByStatusMap[lastToStatus] + statusChangeDuration
 
-			// Print debug
 			if parameters.Debug {
-				fmt.Printf(TERM_COLOR_RED+"Status current in development, considering endDate [%v] \n"+TERM_COLOR_WHITE, formatBrDateWithTime(parameters.EndDate))
+				warn("Status current in development, considering endDate [%s]\n", formatBrDateWithTime(parameters.EndDate))
 			}
 
 			if parameters.DebugVerbose {
@@ -161,10 +162,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		}
 
 		// Calculate the duration of all status
-		if parameters.Debug {
-			fmt.Printf(TERM_COLOR_BLUE+"\n%v\n", issue.Key)
-		}
-
 		var issueTotalDuration time.Duration
 		var statusType string
 
@@ -215,7 +212,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			issueTotalWip := subtractDatesRemovingWeekends(transitionToWipDate, lastFromStatusCreationDate)
 			wipDiffBetweenCalcMethods := issueDurationTotalWip - issueTotalWip
 			if parameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1) {
-				fmt.Printf(TERM_COLOR_RED + "Issue has some strange status transition. Please check it!!! \n" + TERM_COLOR_WHITE)
+				color.Red("Issue has some strange status transition. Please check it!!!")
 			}
 		}
 
@@ -232,7 +229,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 			// Print details if in debug mode
 			if parameters.Debug {
-				fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
+				info("%s = %.2f%% [%s] \n", k, statusPercent, v)
 			}
 		}
 
@@ -277,33 +274,33 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, is
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		if lastType != issueType {
 			lastType = issueType
-			fmt.Printf("\n>> %v\n", issueType)
+			title("\n>> %s\n", issueType)
 		}
 
 		var wipDays []float64
 		totalWipDaysByIssueType := 0
 		for _, issueDetails := range issueDetailsArray {
-			fmt.Printf(TERM_COLOR_BLUE+"%v | %v | Start: %v| End: %v | WIP days: %v | ", issueDetails.Name, issueDetails.Summary,
-				formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate), issueDetails.WIP)
+			startDate, endDate := formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate)
+			toPrint := color.BlueString("%s | %s | Start: %s| End: %s | WIP days: %d", issueDetails.Name, issueDetails.Name, startDate, endDate, issueDetails.WIP)
 
 			if issueDetails.EpicLink != "" {
-				fmt.Printf(" Epic link: %v |", issueDetails.EpicLink)
+				toPrint += color.BlueString(" | Epic link: %v", issueDetails.EpicLink)
 			}
 
 			if len(issueDetails.Labels) > 0 {
-				fmt.Printf(" Labels: %v |", strings.Join(issueDetails.Labels, ", "))
+				toPrint += color.CyanString(" | Labels: %v", strings.Join(issueDetails.Labels, ", "))
 			}
 
 			if issueDetails.Sprint != "" {
-				fmt.Printf(" Sprint: %v |", issueDetails.Sprint)
+				toPrint += color.GreenString(" | Sprint: %v", issueDetails.Sprint)
 			}
 
 			if issueDetails.Resolved {
-				fmt.Printf(TERM_COLOR_YELLOW + " (Done)" + TERM_COLOR_WHITE + "\n")
-			} else {
-				fmt.Print(TERM_COLOR_WHITE + "\n")
+				toPrint += color.YellowString(" (Done)")
 			}
+			toPrint += "\n"
 
+			fmt.Fprintf(color.Output, toPrint)
 			totalWipDaysByIssueType += issueDetails.WIP
 			wipDays = append(wipDays, float64(issueDetails.WIP))
 		}
@@ -408,7 +405,7 @@ func main() {
 
 	boardCfg := loadBoardCfg()
 
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n",
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n",
 		boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
 	extractMetrics(parameters, auth, boardCfg)
@@ -422,8 +419,10 @@ func fmtDuration(d time.Duration) string {
 }
 
 func printIssueTransition(statusChangeTime time.Time, statusChangeTimeStart time.Time, statusChangeDuration time.Duration, statusFrom string, statusTo string) {
-	fmt.Printf("%v - %v\n", formatBrDateWithTime(statusChangeTimeStart), formatBrDateWithTime(statusChangeTime))
-	fmt.Printf("[%v] (%v) -> [%v]\n\n", statusFrom, fmtDuration(statusChangeDuration), statusTo)
+	color.Set(color.FgYellow, color.Bold)
+	defer color.Unset()
+	fmt.Printf("%v - %v", formatBrDateWithTime(statusChangeTimeStart), formatBrDateWithTime(statusChangeTime))
+	fmt.Printf("\n[%v] (%v) -> [%v]\n", statusFrom, fmtDuration(statusChangeDuration), statusTo)
 }
 
 func median(numbers []float64) float64 {
