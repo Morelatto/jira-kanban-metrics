@@ -14,8 +14,6 @@ windows_build()
   GOOS=windows GOARCH=386 go build -o jira_kanban_metrics.exe
 }
 
-export GOPATH=$(pwd)
-
 if [ $# -ne 1 ] || ! [[ $1 =~ ^(linux|windows|all)$ ]];
 then
   echo "$0 {linux | windows | all}"
