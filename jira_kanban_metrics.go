@@ -89,13 +89,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	// Add one day to end date limit to include it in time comparisons
 	parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
 
-	var totalWipDays = 0                                  // Absolute number of WIP days of all issues during the specified period
-	var issueTypeMap = make(map[string]int)               // Number of issues by type [key]
-	var issueTypeLeadTimeMap = make(map[string]float64)   // Number of issues by type [key]
-	var issueTypeConfidenceMap = make(map[string]float64) // Number of issues by type [key]
+	var totalWipDays = 0                    // Absolute number of WIP days of all issues during the specified period
+	var issueTypeMap = make(map[string]int) // Number of issues by type [key]
+	var issueTypeLeadTimeMap = make(map[string]float64)
+	var issueTypeConfidenceMap = make(map[string]float64)
 
-	var totalDurationByStatusMap = make(map[string]time.Duration)     // Duration by status type
-	var totalDurationByStatusTypeMap = make(map[string]time.Duration) // Duration by status type
+	var totalDurationByStatusMap = make(map[string]time.Duration)     // Duration by status name
+	var totalDurationByStatusTypeMap = make(map[string]time.Duration) // Duration by status type (wip, idle)
 	var totalDuration time.Duration                                   // Total duration of all issues processed by the script (All status)
 	var wipDuration time.Duration                                     // WIP duration of all issues (WIP/Idle)
 
@@ -104,7 +104,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range result.Issues {
-
 		var issueDetails IssueDetails
 		var resolved = false
 		var epicLink string
@@ -142,19 +141,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					}
 
 					// Calculating status transition duration
-					statusChangeDuration := statusChangeTime.Sub(lastFromStatusCreationDate)
-					weekendDaysBetweenDates := countWeekendDays(lastFromStatusCreationDate, statusChangeTime)
-					if weekendDaysBetweenDates > 0 {
-						updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60*60*24*weekendDaysBetweenDates)
-						statusChangeDuration = time.Duration(updatedTotalSeconds) * time.Second
-						if parameters.DebugVerbose {
-							fmt.Printf(TERM_COLOR_RED+"Removing weekend days [%v] from Status [%v] \n"+TERM_COLOR_YELLOW, weekendDaysBetweenDates, item.Fromstring)
-						}
-					}
-
-					if parameters.DebugVerbose {
-						printIssueTransition(statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, item.Fromstring, item.Tostring)
-					}
+					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, parameters.DebugVerbose, item.Fromstring, item.Tostring)
 
 					// Group total minutes by status, considering this status transition
 					durationByStatusMap[item.Fromstring] = durationByStatusMap[item.Fromstring] + int64(statusChangeDuration.Minutes())
@@ -163,7 +150,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					// Update vars for next iteration
 					lastToStatus = item.Tostring
 					lastFromStatusCreationDate = statusChangeTime
-
 				} else if item.Field == "Epic Link" {
 					epicLink = item.Tostring
 				} else if item.Field == "Sprint" {
@@ -208,7 +194,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			} else if containsStatus(boardCfg.DoneStatus, k) {
 				statusType = "Done"
 			} else {
-				fmt.Printf("Status %v not mapped in board.cfg, please update it.\n", k)
+				if parameters.Debug {
+					fmt.Printf("Status %v not mapped in board.cfg, please update it.\n", k)
+				}
 				continue
 			}
 
@@ -291,6 +279,10 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueDetailsMapByType[issueDetails.IssueType] = issueArray
 	}
 
+	printMetrics(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap, totalDurationByStatusMap, wipDuration, totalDurationByStatusTypeMap, totalDuration, parameters, wipMonthly, totalWipDays, throughtputMonthly, issueTypeMap, issueDetailsMap)
+}
+
+func printMetrics(issueDetailsMapByType map[string][]IssueDetails, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64, totalDurationByStatusMap map[string]time.Duration, wipDuration time.Duration, totalDurationByStatusTypeMap map[string]time.Duration, totalDuration time.Duration, parameters CLParameters, wipMonthly int, totalWipDays int, throughtputMonthly int, issueTypeMap map[string]int, issueDetailsMap map[string]IssueDetails) {
 	lastType := ""
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		if lastType != issueType {
@@ -330,45 +322,40 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType
 		issueTypeConfidenceMap[issueType] = confidence90(wipDays)
 
-		fmt.Printf("Average lead time: %v\n", math.Round(totalWipAverageByIssueType))
-		fmt.Printf("Median lead time: %v\n", median(wipDays))
-		fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
+		if parameters.Debug {
+			fmt.Printf("Average lead time: %v\n", math.Round(totalWipAverageByIssueType))
+			fmt.Printf("Median lead time: %v\n", median(wipDays))
+			fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
+		}
 	}
-
 	fmt.Printf("\n> Average by Status\n")
 	for k, v := range totalDurationByStatusMap {
 		statusPercent := float64(v*100) / float64(wipDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
 	}
-
 	fmt.Printf("\n> Average by Status Type\n")
 	for k, v := range totalDurationByStatusTypeMap {
 		statusPercent := float64(v*100) / float64(totalDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
 	}
-
 	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
-
 	fmt.Printf("\n> WIP\n")
 	fmt.Printf("Monthly: %v tasks\n", wipMonthly)
 	if totalWipDays > 0 {
 		fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays)/float64(weekDays))
 	}
-
 	fmt.Printf("\n> Throughput\n")
 	fmt.Printf("Total: %v tasks delivered\n", throughtputMonthly)
 	fmt.Printf("By issue type:\n")
 	for key, value := range issueTypeMap {
 		fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, (value*100)/throughtputMonthly)
 	}
-
 	fmt.Printf("\n> Lead time\n")
 	fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays)/float64(throughtputMonthly)))
 	fmt.Printf("By issue type:\n")
 	for issueType, leadTime := range issueTypeLeadTimeMap {
 		fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Round(leadTime), math.Round(issueTypeConfidenceMap[issueType]))
 	}
-
 	fmt.Printf("\n> Data for scaterplot\n")
 	for issueType := range issueTypeMap {
 		fmt.Printf(">> %v\n", issueType)
@@ -389,6 +376,23 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	}
 }
 
+func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate time.Time, debugVerbose bool, statusFrom, statusTo string) time.Duration {
+	statusChangeDuration := statusChangeTime.Sub(lastFromStatusCreationDate)
+	weekendDaysBetweenDates := countWeekendDays(lastFromStatusCreationDate, statusChangeTime)
+	if weekendDaysBetweenDates > 0 {
+		updatedTotalSeconds := statusChangeDuration.Seconds() - float64(60*60*24*weekendDaysBetweenDates)
+		statusChangeDuration = time.Duration(updatedTotalSeconds) * time.Second
+		//if debugVerbose {
+		//	fmt.Printf(TERM_COLOR_RED+"Removing weekend days [%v] from Status [%v] \n"+TERM_COLOR_YELLOW, weekendDaysBetweenDates, statusFrom)
+		//}
+	}
+
+	if debugVerbose {
+		printIssueTransition(statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, statusFrom, statusTo)
+	}
+	return statusChangeDuration
+}
+
 func main() {
 	var parameters = processCommandLineParameters()
 
@@ -396,7 +400,7 @@ func main() {
 
 	boardCfg := loadBoardCfg()
 
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n",
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n",
 		boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
 	extractMetrics(parameters, auth, boardCfg)
