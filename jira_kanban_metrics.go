@@ -56,34 +56,18 @@ func processCommandLineParameters() CLParameters {
 	return parameters
 }
 
-func extractMonthlyThroughput(parameters CLParameters, auth Auth, boardCfg BoardCfg) int {
-	troughputSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND status CHANGED TO (%v) DURING('%v', '%v')",
-		boardCfg.Project, formatColumns(boardCfg.DoneStatus), formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
-
-	if parameters.Debug {
-		fmt.Printf(TERM_COLOR_BLUE+"Troughput JQL: "+TERM_COLOR_WHITE+"%v\n\n", troughputSearch)
-	}
-
-	result := searchIssues(troughputSearch, parameters.JiraUrl, auth)
-	return result.Total
-}
-
 func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
-	throughtputMonthly := extractMonthlyThroughput(parameters, auth, boardCfg)
-
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
-
-	wipSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic "+
-		"AND (status CHANGED TO (%v) DURING('%v', '%v'))",
-		boardCfg.Project,
-		formatColumns(boardCfg.DoneStatus), startDate, endDate)
+	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))", boardCfg.Project, formatColumns(boardCfg.DoneStatus), startDate, endDate)
 
 	if parameters.Debug {
-		fmt.Printf(TERM_COLOR_BLUE+"WIP JQL: "+TERM_COLOR_WHITE+"%v\n\n", wipSearch)
+		fmt.Printf(TERM_COLOR_BLUE+"WIP/Throughput JQL: "+TERM_COLOR_WHITE+"%v\n", jqlSearch)
 	}
 
-	result := searchIssues(wipSearch, parameters.JiraUrl, auth)
+	result := searchIssues(jqlSearch, parameters.JiraUrl, auth)
+	throughputMonthly := result.Total
+
 	wipMonthly := result.Total
 
 	// Add one day to end date limit to include it in time comparisons
@@ -283,8 +267,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	printAverageByStatus(totalDurationByStatusMap, wipDuration)
 	printAverageByStatusType(totalDurationByStatusTypeMap, totalDuration)
 	printWIP(parameters, wipMonthly, totalWipDays)
-	printThroughput(throughtputMonthly, issueTypeMap)
-	printLeadTime(totalWipDays, throughtputMonthly, issueTypeLeadTimeMap, issueTypeConfidenceMap)
+	printThroughput(throughputMonthly, issueTypeMap)
+	printLeadTime(totalWipDays, throughputMonthly, issueTypeLeadTimeMap, issueTypeConfidenceMap)
 	printDataForScaterplot(issueTypeMap, issueDetailsMap, issueTypeConfidenceMap)
 }
 
