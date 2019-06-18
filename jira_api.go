@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// TODO replace by go jira api
 func authenticate(username string, jiraUrl string) Auth {
 	password, err := speakeasy.Ask("Password: ")
 	if err != nil {

@@ -28,6 +28,7 @@ import (
 	"time"
 )
 
+// TODO replace by docopt
 func processCommandLineParameters() CLParameters {
 	var parameters CLParameters
 
@@ -70,6 +71,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	throughputMonthly := result.Total
 
 	wipMonthly := result.Total
+	wipStatus := append(boardCfg.WipStatus, boardCfg.IdleStatus...)
 
 	// Add one day to end date limit to include it in time comparisons
 	parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
@@ -94,9 +96,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var epicLink string
 		var sprint string
 
-		var durationByStatusMap = make(map[string]int64)                  // Total duration [value] by status [key]
-		var issueDurationByStatusMap = make(map[string]time.Duration)     // Total duration [value] by status [key]
-		var issueDurationByStatusTypeMap = make(map[string]time.Duration) // Total duration [value] by status [key]
+		var issueDurationByStatusMap = make(map[string]time.Duration)     // Total issue duration by status name
+		var issueDurationByStatusTypeMap = make(map[string]time.Duration) // Total issue duration by status type
 
 		var lastToStatus string
 		var transitionToWipDate time.Time
@@ -119,7 +120,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					// Timestamp when the transition happened
 					statusChangeTime := parseJiraTime(history.Created)
 
-					wipStatus := append(boardCfg.WipStatus, boardCfg.IdleStatus...)
 					// Mapping var to calculate total WIP of the issue
 					if transitionToWipDate.IsZero() && containsStatus(wipStatus, item.Tostring) {
 						transitionToWipDate = statusChangeTime
@@ -129,7 +129,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, parameters.DebugVerbose, item.Fromstring, item.Tostring)
 
 					// Group total minutes by status, considering this status transition
-					durationByStatusMap[item.Fromstring] = durationByStatusMap[item.Fromstring] + int64(statusChangeDuration.Minutes())
 					issueDurationByStatusMap[item.Fromstring] = issueDurationByStatusMap[item.Fromstring] + statusChangeDuration
 
 					// Update vars for next iteration
@@ -149,7 +148,6 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
 
 			// Group total minutes by status, considering this status transition
-			durationByStatusMap[lastToStatus] = durationByStatusMap[lastToStatus] + int64(statusChangeDuration.Minutes())
 			issueDurationByStatusMap[lastToStatus] = issueDurationByStatusMap[lastToStatus] + statusChangeDuration
 
 			if parameters.Debug {
