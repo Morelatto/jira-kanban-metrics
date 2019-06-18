@@ -89,6 +89,8 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	var issueDetailsMap = make(map[string]IssueDetails)
 	var issueDetailsMapByType = make(map[string][]IssueDetails)
 
+	var notMappedStatus = make(map[string]int)
+
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range result.Issues {
 		var issueDetails IssueDetails
@@ -173,9 +175,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 			} else if containsStatus(boardCfg.DoneStatus, k) {
 				statusType = "Done"
 			} else {
-				if parameters.Debug {
-					fmt.Printf("Status %v not mapped in board.cfg, please update it.\n", k)
-				}
+				notMappedStatus[k]++
 				continue
 			}
 
@@ -256,6 +256,13 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueArray := issueDetailsMapByType[issueDetails.IssueType]
 		issueArray = append(issueArray, issueDetails)
 		issueDetailsMapByType[issueDetails.IssueType] = issueArray
+	}
+
+	if parameters.Debug {
+		fmt.Println("\nThe following status were found but not mapped in board.cfg:")
+		for status := range notMappedStatus {
+			fmt.Println(status)
+		}
 	}
 
 	printIssueDetailsByType(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap, parameters)
