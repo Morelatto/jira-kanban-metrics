@@ -37,22 +37,30 @@ Usage:
   jira-kanban-metrics --version
 
 Arguments:
-  startDate  Start date in ddmmyyyy format.
-  endDate  End date in ddmmyyyy format.
+  startDate  Start date in dd/mm/yyyy format.
+  endDate    End date in dd/mm/yyyy format.
 
 Options:
   -h --help  Show this screen.
   --version  Show version.
-  --debug  Debug mode [default: false].
+  --debug    Debug mode [default: false].
 `
 
-func extractMetrics(client *jira.Client) {
-	jqlSearch := getIssuesBetweenInProjectWithStatus(CLParameters.StartDate, CLParameters.EndDate, BoardCfg.Project, BoardCfg.DoneStatus)
-	if CLParameters.Debug {
-		title("WIP/Throughput JQL: %s\n", jqlSearch)
-	}
+func main() {
+	arguments, _ := docopt.ParseArgs(usage, nil, "1.0")
+	arguments.Bind(&CLParameters)
 
-	issues := searchIssues(jqlSearch, client)
+	loadBoardCfg()
+	authJiraClient()
+
+	jqlSearch := getIssuesBetweenInProjectWithStatus(CLParameters.StartDate, CLParameters.EndDate, BoardCfg.Project, BoardCfg.DoneStatus)
+	extractMetrics(searchIssues(jqlSearch))
+}
+
+func extractMetrics(issues []jira.Issue) {
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n",
+		BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
+
 	throughputMonthly := len(issues)
 	wipMonthly := len(issues)
 	wipStatus := append(BoardCfg.WipStatus, BoardCfg.IdleStatus...)
@@ -233,10 +241,7 @@ func extractMetrics(client *jira.Client) {
 		issueDetails.Labels = issue.Fields.Labels
 
 		issueDetailsMap[issueDetails.Name] = issueDetails
-
-		issueArray := issueDetailsMapByType[issueDetails.IssueType]
-		issueArray = append(issueArray, issueDetails)
-		issueDetailsMapByType[issueDetails.IssueType] = issueArray
+		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
 
 	if CLParameters.Debug {
@@ -382,15 +387,6 @@ func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate 
 		printIssueTransition(statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, statusFrom, statusTo)
 	}
 	return statusChangeDuration
-}
-
-func main() {
-	arguments, _ := docopt.ParseArgs(usage, nil, "1.0")
-	arguments.Bind(&CLParameters)
-	loadBoardCfg()
-	var client = getJiraClient()
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
-	extractMetrics(client)
 }
 
 func fmtDuration(d time.Duration) string {

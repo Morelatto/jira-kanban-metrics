@@ -4,9 +4,9 @@ import (
 	"time"
 )
 
-// dateStr: MM/DD/YYYY
+// dateStr: DD/MM/YYYY
 func parseDate(dateStr string) time.Time {
-	const defaultDateFormat = "01/02/2006"
+	const defaultDateFormat = "02/01/2006"
 
 	parsedDate, err := time.Parse(defaultDateFormat, dateStr)
 	if err != nil {

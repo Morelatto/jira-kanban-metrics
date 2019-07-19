@@ -10,11 +10,13 @@ import (
 	"time"
 )
 
-func getJiraClient() *jira.Client {
+var JiraClient jira.Client
+
+func authJiraClient() {
 	tp := jira.BasicAuthTransport{
 		Username: strings.TrimSpace(BoardCfg.Login),
 		Password: strings.TrimSpace(BoardCfg.Password),
-		// ignore certs
+		// ignore missing certs
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
@@ -24,21 +26,24 @@ func getJiraClient() *jira.Client {
 		panic(err)
 	}
 
-	return client
+	JiraClient = *client
 }
 
 func getIssuesBetweenInProjectWithStatus(start, end string, project string, statuses []string) string {
-	return fmt.Sprintf(
-		"project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
+	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
 		project, formatColumns(statuses), formatJiraDate(parseDate(start)), formatJiraDate(parseDate(end)))
+	if CLParameters.Debug {
+		title("WIP/Throughput JQL: %s\n", jqlSearch)
+	}
+	return jqlSearch
 }
 
-func searchIssues(jql string, client *jira.Client) []jira.Issue {
+func searchIssues(jql string) []jira.Issue {
 	searchOptions := &jira.SearchOptions{
 		MaxResults: 1000,
 		Expand:     "changelog",
 	}
-	issues, response, err := client.Issue.Search(jql, searchOptions)
+	issues, response, err := JiraClient.Issue.Search(jql, searchOptions)
 	if err != nil {
 		panic(err)
 	}
