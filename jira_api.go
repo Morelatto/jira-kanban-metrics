@@ -4,33 +4,33 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/andygrunwald/go-jira"
-	"github.com/bgentry/speakeasy"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
 )
 
-func getJiraClient(username string, jiraUrl string) *jira.Client {
-	password, err := speakeasy.Ask("Password: ")
-	if err != nil {
-		panic(err)
-	}
-
+func getJiraClient() *jira.Client {
 	tp := jira.BasicAuthTransport{
-		Username: strings.TrimSpace(username),
-		Password: password,
+		Username: strings.TrimSpace(BoardCfg.Login),
+		Password: strings.TrimSpace(BoardCfg.Password),
 		// ignore certs
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	client, err := jira.NewClient(tp.Client(), jiraUrl)
+	client, err := jira.NewClient(tp.Client(), BoardCfg.JiraUrl)
 	if err != nil {
 		panic(err)
 	}
 
 	return client
+}
+
+func getIssuesBetweenInProjectWithStatus(start, end string, project string, statuses []string) string {
+	return fmt.Sprintf(
+		"project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
+		project, formatColumns(statuses), formatJiraDate(parseDate(start)), formatJiraDate(parseDate(end)))
 }
 
 func searchIssues(jql string, client *jira.Client) []jira.Issue {
@@ -51,7 +51,7 @@ func searchIssues(jql string, client *jira.Client) []jira.Issue {
 	return issues
 }
 
-func countWeekDays(start time.Time, end time.Time) int {
+func countWeekDays(start, end time.Time) int {
 	var weekDays = 0
 
 	dateIndex := start

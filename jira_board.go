@@ -1,24 +1,24 @@
 package main
 
 import (
-    "os"
-    "fmt"
-    "encoding/json"
+	"encoding/json"
+	"os"
 )
 
-func loadBoardCfg() BoardCfg {
-    if _, err := os.Stat("jira_board.cfg"); os.IsNotExist(err) {
-        panic("jira_board.cfg not found")
-    }
+func loadBoardCfg() {
+	if _, err := os.Stat("jira_board.cfg"); os.IsNotExist(err) {
+		panic("jira_board.cfg not found")
+	}
 
-    file, _ := os.Open("jira_board.cfg")
-    decoder := json.NewDecoder(file)
-    boardCfg := BoardCfg{}
-    err := decoder.Decode(&boardCfg)
+	file, err := os.Open("jira_board.cfg")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
 
-    if err != nil {
-        fmt.Println("error:", err)
-    }
-
-    return boardCfg
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&BoardCfg)
+	if err != nil {
+		panic(err)
+	}
 }

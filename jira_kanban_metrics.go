@@ -21,60 +21,44 @@ package main
 import (
 	"fmt"
 	"github.com/andygrunwald/go-jira"
+	"github.com/docopt/docopt-go"
 	"github.com/zchee/color" // TODO test colors on windows and terminator
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"time"
 )
 
-// TODO replace by docopt
-func processCommandLineParameters() CLParameters {
-	var parameters CLParameters
+var usage = `Jira Kanban Metrics.
 
-	if len(os.Args) < 5 {
-		fmt.Printf("usage: %v <login> <startDate> <endDate> <jiraUrl> --debug\n", os.Args[0])
-		fmt.Printf("example: %v user 01/31/2010 04/31/2010 http://jira.intranet/jira\n", os.Args[0])
-		os.Exit(0)
-	}
+Usage: 
+  jira-kanban-metrics <startDate> <endDate> [--debug]
+  jira-kanban-metrics -h | --help
+  jira-kanban-metrics --version
 
-	parameters.Login = os.Args[1]
-	parameters.StartDate = parseDate(os.Args[2])
-	parameters.EndDate = parseDate(os.Args[3])
-	parameters.JiraUrl = os.Args[4]
-	parameters.Debug = false
-	parameters.DebugVerbose = false
+Arguments:
+  startDate  Start date in ddmmyyyy format.
+  endDate  End date in ddmmyyyy format.
 
-	if len(os.Args) == 6 {
-		debugMethod := os.Args[5]
-		if debugMethod == "--debug" {
-			parameters.Debug = true
-		} else if debugMethod == "--debug--verbose" {
-			parameters.Debug = true
-			parameters.DebugVerbose = true
-		}
-	}
+Options:
+  -h --help  Show this screen.
+  --version  Show version.
+  --debug  Debug mode [default: false].
+`
 
-	return parameters
-}
-
-func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg BoardCfg) {
-	startDate := formatJiraDate(parameters.StartDate)
-	endDate := formatJiraDate(parameters.EndDate)
-	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))", boardCfg.Project, formatColumns(boardCfg.DoneStatus), startDate, endDate)
-
-	if parameters.Debug {
+func extractMetrics(client *jira.Client) {
+	jqlSearch := getIssuesBetweenInProjectWithStatus(CLParameters.StartDate, CLParameters.EndDate, BoardCfg.Project, BoardCfg.DoneStatus)
+	if CLParameters.Debug {
 		title("WIP/Throughput JQL: %s\n", jqlSearch)
 	}
 
 	issues := searchIssues(jqlSearch, client)
 	throughputMonthly := len(issues)
 	wipMonthly := len(issues)
-	wipStatus := append(boardCfg.WipStatus, boardCfg.IdleStatus...)
+	wipStatus := append(BoardCfg.WipStatus, BoardCfg.IdleStatus...)
 
 	// Add one day to end date limit to include it in time comparisons
-	parameters.EndDate = parameters.EndDate.Add(time.Hour * 24)
+	endDate := parseDate(CLParameters.EndDate).Add(time.Hour * 24)
 
 	var totalWipDays = 0                    // Absolute number of WIP days of all issues during the specified period
 	var issueTypeMap = make(map[string]int) // Number of issues by type [key]
@@ -107,7 +91,7 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 		var issueCreatedDate = time.Time(issue.Fields.Created)
 		var lastFromStatusCreationDate = issueCreatedDate
 
-		if parameters.DebugVerbose {
+		if CLParameters.Debug {
 			title("\n%s\n", issue.Key)
 		}
 
@@ -128,7 +112,7 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 					}
 
 					// Calculating status transition duration
-					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, parameters.DebugVerbose, item.FromString, item.ToString)
+					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, item.FromString, item.ToString)
 
 					// Group total minutes by status, considering this status transition
 					issueDurationByStatusMap[item.FromString] = issueDurationByStatusMap[item.FromString] + statusChangeDuration
@@ -146,18 +130,15 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 
 		// FIXME considers endDate of opened issue as today, is this right?
 		// Calculate the duration of the last transition, if it's not done (current in dev)
-		if lastFromStatusCreationDate.Before(parameters.EndDate) && !containsStatus(boardCfg.DoneStatus, lastToStatus) {
-			statusChangeDuration := parameters.EndDate.Sub(lastFromStatusCreationDate)
+		if lastFromStatusCreationDate.Before(endDate) && !containsStatus(BoardCfg.DoneStatus, lastToStatus) {
+			statusChangeDuration := endDate.Sub(lastFromStatusCreationDate)
 
 			// Group total minutes by status, considering this status transition
 			issueDurationByStatusMap[lastToStatus] = issueDurationByStatusMap[lastToStatus] + statusChangeDuration
 
-			if parameters.Debug {
-				warn("Status current in development, considering endDate [%s]\n", formatBrDateWithTime(parameters.EndDate))
-			}
-
-			if parameters.DebugVerbose {
-				printIssueTransition(parameters.EndDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None")
+			if CLParameters.Debug {
+				warn("Status current in development, considering endDate [%s]\n", formatBrDateWithTime(endDate))
+				printIssueTransition(endDate, lastFromStatusCreationDate, statusChangeDuration, lastToStatus, "None")
 			}
 		}
 
@@ -166,13 +147,13 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 		var statusType string
 
 		for k, v := range issueDurationByStatusMap {
-			if containsStatus(boardCfg.OpenStatus, k) {
+			if containsStatus(BoardCfg.OpenStatus, k) {
 				statusType = "Open"
-			} else if containsStatus(boardCfg.WipStatus, k) {
+			} else if containsStatus(BoardCfg.WipStatus, k) {
 				statusType = "Wip"
-			} else if containsStatus(boardCfg.IdleStatus, k) {
+			} else if containsStatus(BoardCfg.IdleStatus, k) {
 				statusType = "Idle"
-			} else if containsStatus(boardCfg.DoneStatus, k) {
+			} else if containsStatus(BoardCfg.DoneStatus, k) {
 				statusType = "Done"
 			} else {
 				notMappedStatus[k]++
@@ -189,7 +170,7 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 				totalDuration += v
 			}
 
-			if parameters.Debug {
+			if CLParameters.Debug {
 				fmt.Printf("Status [%v] time in [%v] \n", k, v)
 			}
 		}
@@ -203,13 +184,13 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 		totalWipDays += issueWipDays
 
 		// Verify if the last transition is to a resolved status
-		if containsStatus(boardCfg.DoneStatus, lastToStatus) {
+		if containsStatus(BoardCfg.DoneStatus, lastToStatus) {
 			resolved = true
 
 			// Double check if the wip is being calculated correct, it's not used for anything else
 			issueTotalWip := subtractDatesRemovingWeekends(transitionToWipDate, lastFromStatusCreationDate)
 			wipDiffBetweenCalcMethods := issueDurationTotalWip - issueTotalWip
-			if parameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1) {
+			if CLParameters.Debug && (wipDiffBetweenCalcMethods.Hours() > 1 || wipDiffBetweenCalcMethods.Hours() < -1) {
 				color.Red("Issue has some strange status transition. Please check it!!!")
 			}
 		}
@@ -226,13 +207,13 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 			totalDurationByStatusTypeMap[k] += v
 
 			// Print details if in debug mode
-			if parameters.Debug {
+			if CLParameters.Debug {
 				info("%s = %.2f%% [%s] \n", k, statusPercent, v)
 			}
 		}
 
 		// Print status transition details by issue if in debug Mode
-		if parameters.DebugVerbose {
+		if CLParameters.Debug {
 			fmt.Print("\n>Status Transition Details\n")
 			for k, v := range issueDurationByStatusMap {
 				statusPercent := float64(v*100) / float64(issueTotalDuration)
@@ -258,23 +239,23 @@ func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg Board
 		issueDetailsMapByType[issueDetails.IssueType] = issueArray
 	}
 
-	if parameters.Debug {
+	if CLParameters.Debug {
 		fmt.Println("\nThe following status were found but not mapped in board.cfg:")
 		for status := range notMappedStatus {
 			fmt.Println(status)
 		}
 	}
 
-	printIssueDetailsByType(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap, parameters)
+	printIssueDetailsByType(issueDetailsMapByType, issueTypeLeadTimeMap, issueTypeConfidenceMap)
 	printAverageByStatus(totalDurationByStatusMap, wipDuration)
 	printAverageByStatusType(totalDurationByStatusTypeMap, totalDuration)
-	printWIP(parameters, wipMonthly, totalWipDays)
+	printWIP(wipMonthly, totalWipDays, parseDate(CLParameters.StartDate), endDate)
 	printThroughput(throughputMonthly, issueTypeMap)
 	printLeadTime(totalWipDays, throughputMonthly, issueTypeLeadTimeMap, issueTypeConfidenceMap)
 	printDataForScaterplot(issueTypeMap, issueDetailsMap, issueTypeConfidenceMap)
 }
 
-func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64, parameters CLParameters) {
+func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64) {
 	lastType := ""
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		if lastType != issueType {
@@ -314,7 +295,7 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, is
 		issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType
 		issueTypeConfidenceMap[issueType] = confidence90(wipDays)
 
-		if parameters.Debug {
+		if CLParameters.Debug {
 			fmt.Printf("Average lead time: %v\n", math.Round(totalWipAverageByIssueType))
 			fmt.Printf("Median lead time: %v\n", median(wipDays))
 			fmt.Printf("Confidence lead time: %v\n", confidence90(wipDays))
@@ -338,8 +319,8 @@ func printAverageByStatusType(totalDurationByStatusTypeMap map[string]time.Durat
 	}
 }
 
-func printWIP(parameters CLParameters, wipMonthly int, totalWipDays int) {
-	weekDays := countWeekDays(parameters.StartDate, parameters.EndDate)
+func printWIP(wipMonthly int, totalWipDays int, startDate, endDate time.Time) {
+	weekDays := countWeekDays(startDate, endDate)
 	fmt.Printf("\n> WIP\n")
 	fmt.Printf("Monthly: %v tasks\n", wipMonthly)
 	if totalWipDays > 0 {
@@ -386,7 +367,7 @@ func printDataForScaterplot(issueTypeMap map[string]int, issueDetailsMap map[str
 	}
 }
 
-func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate time.Time, debugVerbose bool, statusFrom, statusTo string) time.Duration {
+func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate time.Time, statusFrom, statusTo string) time.Duration {
 	statusChangeDuration := statusChangeTime.Sub(lastFromStatusCreationDate)
 	weekendDaysBetweenDates := countWeekendDays(lastFromStatusCreationDate, statusChangeTime)
 	if weekendDaysBetweenDates > 0 {
@@ -397,23 +378,19 @@ func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate 
 		//}
 	}
 
-	if debugVerbose {
+	if CLParameters.Debug {
 		printIssueTransition(statusChangeTime, lastFromStatusCreationDate, statusChangeDuration, statusFrom, statusTo)
 	}
 	return statusChangeDuration
 }
 
 func main() {
-	var parameters = processCommandLineParameters()
-
-	var client = getJiraClient(parameters.Login, parameters.JiraUrl)
-
-	boardCfg := loadBoardCfg()
-
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n",
-		boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
-
-	extractMetrics(parameters, client, boardCfg)
+	arguments, _ := docopt.ParseArgs(usage, nil, "1.0")
+	arguments.Bind(&CLParameters)
+	loadBoardCfg()
+	var client = getJiraClient()
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n", BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
+	extractMetrics(client)
 }
 
 func fmtDuration(d time.Duration) string {

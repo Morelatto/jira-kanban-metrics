@@ -4,16 +4,16 @@ import (
 	"time"
 )
 
-type CLParameters struct {
-	Login        string
-	StartDate    time.Time
-	EndDate      time.Time
-	JiraUrl      string
-	Debug        bool
-	DebugVerbose bool
+var CLParameters struct {
+	StartDate string `docopt:"<startDate>"`
+	EndDate   string `docopt:"<endDate>"`
+	Debug     bool
 }
 
-type BoardCfg struct {
+var BoardCfg struct {
+	JiraUrl    string
+	Login      string
+	Password   string
 	Project    string
 	OpenStatus []string
 	WipStatus  []string
