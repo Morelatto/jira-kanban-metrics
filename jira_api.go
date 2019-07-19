@@ -1,103 +1,54 @@
 package main
 
 import (
-	"bytes"
 	"crypto/tls"
-	"encoding/json"
+	"fmt"
+	"github.com/andygrunwald/go-jira"
 	"github.com/bgentry/speakeasy"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// TODO replace by go jira api
-func authenticate(username string, jiraUrl string) Auth {
+func getJiraClient(username string, jiraUrl string) *jira.Client {
 	password, err := speakeasy.Ask("Password: ")
 	if err != nil {
 		panic(err)
 	}
 
-	var authUrl = jiraUrl + "/rest/auth/1/session"
-	var jsonStr = []byte(`{"username":"` + username + `", "password":"` + password + `"}`)
-
-	req, err := http.NewRequest("POST", authUrl, bytes.NewBuffer(jsonStr))
-	req.Header.Set("Content-Type", "application/json")
-
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-
-	client := &http.Client{Transport: tr}
-	resp, err := client.Do(req)
-
+	tp := jira.BasicAuthTransport{
+		Username: strings.TrimSpace(username),
+		Password: password,
+		// ignore certs
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	client, err := jira.NewClient(tp.Client(), jiraUrl)
 	if err != nil {
 		panic(err)
 	}
 
-	if resp.StatusCode != 200 {
-		panic("Jira authentication failure")
-	}
-
-	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	var auth Auth
-	json.Unmarshal(body, &auth)
-
-	return auth
+	return client
 }
 
-func httpGet(url string, auth Auth, insecure bool) []byte {
-	req, err := http.NewRequest("GET", url, nil)
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cookie", auth.Session.Name+"="+auth.Session.Value)
-
-	var client http.Client
-
-	if insecure {
-		tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-		client = http.Client{Transport: tr}
-	} else {
-		client = http.Client{}
+func searchIssues(jql string, client *jira.Client) []jira.Issue {
+	searchOptions := &jira.SearchOptions{
+		MaxResults: 1000,
+		Expand:     "changelog",
 	}
-
-	resp, err := client.Do(req)
-
+	issues, response, err := client.Issue.Search(jql, searchOptions)
 	if err != nil {
 		panic(err)
 	}
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		panic(err)
+	if response.StatusCode != 200 {
+		fmt.Println("Response Code: " + response.Status)
+		bodyBytes, _ := ioutil.ReadAll(response.Body)
+		fmt.Println("Body: " + string(bodyBytes))
+		return nil
 	}
-
-	return body
-}
-
-func searchIssues(jql string, jiraUrl string, auth Auth) SearchResult {
-    var searchUrl = jiraUrl + "/rest/api/2/search?jql=" + url.QueryEscape(jql) + "&expand=changelog&maxResults=1000"
-
-    body := httpGet(searchUrl, auth, true)
-
-	var result SearchResult
-	json.Unmarshal(body, &result)
-
-	return result
-}
-
-func getIssue(issueId int, jiraUrl string, auth Auth) Issue {
-	var issueUrl = jiraUrl + "/rest/api/2/issue/" + strconv.Itoa(issueId) + "?expand=changelog"
-
-	body := httpGet(issueUrl, auth, true)
-
-	var issue Issue
-	json.Unmarshal(body, &issue)
-
-	return issue
+	return issues
 }
 
 func countWeekDays(start time.Time, end time.Time) int {

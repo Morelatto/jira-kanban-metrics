@@ -20,6 +20,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/andygrunwald/go-jira"
 	"github.com/zchee/color" // TODO test colors on windows and terminator
 	"math"
 	"os"
@@ -58,7 +59,7 @@ func processCommandLineParameters() CLParameters {
 	return parameters
 }
 
-func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
+func extractMetrics(parameters CLParameters, client *jira.Client, boardCfg BoardCfg) {
 	startDate := formatJiraDate(parameters.StartDate)
 	endDate := formatJiraDate(parameters.EndDate)
 	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))", boardCfg.Project, formatColumns(boardCfg.DoneStatus), startDate, endDate)
@@ -67,10 +68,9 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		title("WIP/Throughput JQL: %s\n", jqlSearch)
 	}
 
-	result := searchIssues(jqlSearch, parameters.JiraUrl, auth)
-	throughputMonthly := result.Total
-
-	wipMonthly := result.Total
+	issues := searchIssues(jqlSearch, client)
+	throughputMonthly := len(issues)
+	wipMonthly := len(issues)
 	wipStatus := append(boardCfg.WipStatus, boardCfg.IdleStatus...)
 
 	// Add one day to end date limit to include it in time comparisons
@@ -92,7 +92,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 	var notMappedStatus = make(map[string]int)
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
-	for _, issue := range result.Issues {
+	for _, issue := range issues {
 		var issueDetails IssueDetails
 		var resolved = false
 		var epicLink string
@@ -104,7 +104,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		var lastToStatus string
 		var transitionToWipDate time.Time
 
-		var issueCreatedDate = parseJiraTime(issue.Fields.Created)
+		var issueCreatedDate = time.Time(issue.Fields.Created)
 		var lastFromStatusCreationDate = issueCreatedDate
 
 		if parameters.DebugVerbose {
@@ -114,7 +114,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		for _, history := range issue.Changelog.Histories {
 			for _, item := range history.Items {
 				// Ignore transitions to the same status
-				if item.Fromstring == item.Tostring {
+				if item.From == item.To {
 					continue
 				}
 
@@ -123,23 +123,23 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 					statusChangeTime := parseJiraTime(history.Created)
 
 					// Mapping var to calculate total WIP of the issue
-					if transitionToWipDate.IsZero() && containsStatus(wipStatus, item.Tostring) {
+					if transitionToWipDate.IsZero() && containsStatus(wipStatus, item.ToString) {
 						transitionToWipDate = statusChangeTime
 					}
 
 					// Calculating status transition duration
-					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, parameters.DebugVerbose, item.Fromstring, item.Tostring)
+					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, parameters.DebugVerbose, item.FromString, item.ToString)
 
 					// Group total minutes by status, considering this status transition
-					issueDurationByStatusMap[item.Fromstring] = issueDurationByStatusMap[item.Fromstring] + statusChangeDuration
+					issueDurationByStatusMap[item.FromString] = issueDurationByStatusMap[item.FromString] + statusChangeDuration
 
 					// Update vars for next iteration
-					lastToStatus = item.Tostring
+					lastToStatus = item.ToString
 					lastFromStatusCreationDate = statusChangeTime
 				} else if item.Field == "Epic Link" {
-					epicLink = item.Tostring
+					epicLink = item.ToString
 				} else if item.Field == "Sprint" {
-					sprint = item.Tostring
+					sprint = item.ToString
 				}
 			}
 		}
@@ -215,7 +215,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		}
 
 		if resolved {
-			issueTypeMap[issue.Fields.Issuetype.Name]++
+			issueTypeMap[issue.Fields.Type.Name]++
 		}
 
 		// Calculating percentage by status type configured in board.cfg
@@ -247,7 +247,7 @@ func extractMetrics(parameters CLParameters, auth Auth, boardCfg BoardCfg) {
 		issueDetails.WIP = issueWipDays
 		issueDetails.EpicLink = epicLink
 		issueDetails.Sprint = sprint
-		issueDetails.IssueType = issue.Fields.Issuetype.Name
+		issueDetails.IssueType = issue.Fields.Type.Name
 		issueDetails.Resolved = resolved
 		issueDetails.Labels = issue.Fields.Labels
 
@@ -406,14 +406,14 @@ func calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate 
 func main() {
 	var parameters = processCommandLineParameters()
 
-	var auth = authenticate(parameters.Login, parameters.JiraUrl)
+	var client = getJiraClient(parameters.Login, parameters.JiraUrl)
 
 	boardCfg := loadBoardCfg()
 
 	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n\n",
 		boardCfg.Project, formatJiraDate(parameters.StartDate), formatJiraDate(parameters.EndDate))
 
-	extractMetrics(parameters, auth, boardCfg)
+	extractMetrics(parameters, client, boardCfg)
 }
 
 func fmtDuration(d time.Duration) string {
