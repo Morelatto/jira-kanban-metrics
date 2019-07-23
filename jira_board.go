@@ -6,11 +6,12 @@ import (
 )
 
 func loadBoardCfg() {
-	if _, err := os.Stat("jira_board.cfg"); os.IsNotExist(err) {
-		panic("jira_board.cfg not found")
+	const configFile = "jira_board.cfg"
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		panic(configFile + " not found")
 	}
 
-	file, err := os.Open("jira_board.cfg")
+	file, err := os.Open(configFile)
 	if err != nil {
 		panic(err)
 	}

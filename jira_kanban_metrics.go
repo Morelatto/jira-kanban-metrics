@@ -48,7 +48,10 @@ Options:
 
 func main() {
 	arguments, _ := docopt.ParseArgs(usage, nil, "1.0")
-	arguments.Bind(&CLParameters)
+	err := arguments.Bind(&CLParameters)
+	if err != nil {
+		panic(err)
+	}
 
 	loadBoardCfg()
 	authJiraClient()
@@ -136,7 +139,6 @@ func extractMetrics(issues []jira.Issue) {
 			}
 		}
 
-		// FIXME considers endDate of opened issue as today, is this right?
 		// Calculate the duration of the last transition, if it's not done (current in dev)
 		if lastFromStatusCreationDate.Before(endDate) && !containsStatus(BoardCfg.DoneStatus, lastToStatus) {
 			statusChangeDuration := endDate.Sub(lastFromStatusCreationDate)
@@ -333,18 +335,18 @@ func printWIP(wipMonthly int, totalWipDays int, startDate, endDate time.Time) {
 	}
 }
 
-func printThroughput(throughtputMonthly int, issueTypeMap map[string]int) {
+func printThroughput(throughputMonthly int, issueTypeMap map[string]int) {
 	fmt.Printf("\n> Throughput\n")
-	fmt.Printf("Total: %v tasks delivered\n", throughtputMonthly)
+	fmt.Printf("Total: %v tasks delivered\n", throughputMonthly)
 	fmt.Printf("By issue type:\n")
 	for key, value := range issueTypeMap {
-		fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, (value*100)/throughtputMonthly)
+		fmt.Printf("- %v: %v tasks (%v%%)\n", key, value, (value*100)/throughputMonthly)
 	}
 }
 
-func printLeadTime(totalWipDays int, throughtputMonthly int, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64) {
+func printLeadTime(totalWipDays int, throughputMonthly int, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64) {
 	fmt.Printf("\n> Lead time\n")
-	fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays)/float64(throughtputMonthly)))
+	fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays)/float64(throughputMonthly)))
 	fmt.Printf("By issue type:\n")
 	for issueType, leadTime := range issueTypeLeadTimeMap {
 		fmt.Printf("- %v: %v days - 90%% < %v days \n", issueType, math.Round(leadTime), math.Round(issueTypeConfidenceMap[issueType]))
@@ -432,8 +434,8 @@ func variation(values []float64, median float64) float64 {
 	return total / float64(len(values)-1)
 }
 
-func confidence(median float64, standarDeviation float64) float64 {
-	return median + (1.644854 * standarDeviation)
+func confidence(median float64, standardDeviation float64) float64 {
+	return median + (1.644854 * standardDeviation)
 }
 
 func confidence90(values []float64) float64 {
