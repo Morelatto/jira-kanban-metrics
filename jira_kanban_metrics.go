@@ -41,9 +41,9 @@ Arguments:
   endDate    End date in dd/mm/yyyy format.
 
 Options:
+  --debug    Print debug output [default: false].
   -h --help  Show this screen.
   --version  Show version.
-  --debug    Debug mode [default: false].
 `
 
 func main() {
