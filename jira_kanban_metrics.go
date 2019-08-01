@@ -61,8 +61,7 @@ func main() {
 }
 
 func extractMetrics(issues []jira.Issue) {
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n",
-		BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
+	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n", BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
 
 	throughputMonthly := len(issues)
 	wipMonthly := len(issues)
@@ -246,7 +245,7 @@ func extractMetrics(issues []jira.Issue) {
 		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
 
-	if CLParameters.Debug {
+	if CLParameters.Debug && len(notMappedStatus) > 0 {
 		fmt.Println("\nThe following status were found but not mapped in board.cfg:")
 		for status := range notMappedStatus {
 			fmt.Println(status)
@@ -274,7 +273,7 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, is
 		totalWipDaysByIssueType := 0
 		for _, issueDetails := range issueDetailsArray {
 			startDate, endDate := formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate)
-			toPrint := color.BlueString("%s | %s | Start: %s| End: %s | WIP days: %d", issueDetails.Name, issueDetails.Name, startDate, endDate, issueDetails.WIP)
+			toPrint := color.BlueString("%s | %s | Start: %s| End: %s | WIP days: %d", issueDetails.Name, issueDetails.Summary, startDate, endDate, issueDetails.WIP)
 
 			if issueDetails.EpicLink != "" {
 				toPrint += color.BlueString(" | Epic link: %v", issueDetails.EpicLink)
