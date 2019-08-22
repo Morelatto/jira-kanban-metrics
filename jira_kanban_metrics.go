@@ -61,7 +61,7 @@ func main() {
 }
 
 func extractMetrics(issues []jira.Issue) {
-	fmt.Printf("Extracting Kanban metrics from project %v, %v to %v\n", BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
+	title("Extracting Kanban metrics from project %s, %s to %s\n", BoardCfg.Project, CLParameters.StartDate, CLParameters.EndDate)
 
 	throughputMonthly := len(issues)
 	wipMonthly := len(issues)
@@ -125,7 +125,7 @@ func extractMetrics(issues []jira.Issue) {
 					statusChangeDuration := calculateStatusChangeDuration(statusChangeTime, lastFromStatusCreationDate, item.FromString, item.ToString)
 
 					// Group total minutes by status, considering this status transition
-					issueDurationByStatusMap[item.FromString] = issueDurationByStatusMap[item.FromString] + statusChangeDuration
+					issueDurationByStatusMap[item.FromString] += statusChangeDuration
 
 					// Update vars for next iteration
 					lastToStatus = item.ToString
@@ -232,7 +232,11 @@ func extractMetrics(issues []jira.Issue) {
 
 		issueDetails.Name = issue.Key
 		issueDetails.Summary = issue.Fields.Summary
-		issueDetails.StartDate = transitionToWipDate
+		if transitionToWipDate.IsZero() {
+			issueDetails.StartDate = time.Time(issue.Fields.Created)
+		} else {
+			issueDetails.StartDate = transitionToWipDate
+		}
 		issueDetails.EndDate = lastFromStatusCreationDate
 		issueDetails.WIP = issueWipDays
 		issueDetails.EpicLink = epicLink
@@ -245,8 +249,8 @@ func extractMetrics(issues []jira.Issue) {
 		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
 
-	if CLParameters.Debug && len(notMappedStatus) > 0 {
-		fmt.Println("\nThe following status were found but not mapped in board.cfg:")
+	if len(notMappedStatus) > 0 {
+		warn("\nThe following status were found but not mapped in board.cfg:\n")
 		for status := range notMappedStatus {
 			fmt.Println(status)
 		}
@@ -273,18 +277,25 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, is
 		totalWipDaysByIssueType := 0
 		for _, issueDetails := range issueDetailsArray {
 			startDate, endDate := formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate)
-			toPrint := color.BlueString("%s | %s | Start: %s| End: %s | WIP days: %d", issueDetails.Name, issueDetails.Summary, startDate, endDate, issueDetails.WIP)
-
+			const separator = " | "
+			toPrint := color.RedString(issueDetails.Name) + separator
+			toPrint += color.WhiteString(issueDetails.Summary) + separator
+			toPrint += color.YellowString("Start: %s", startDate) + separator
+			toPrint += color.YellowString("End: %s", endDate) + separator
+			toPrint += color.WhiteString("WIP days: %d", issueDetails.WIP)
 			if issueDetails.EpicLink != "" {
-				toPrint += color.BlueString(" | Epic link: %v", issueDetails.EpicLink)
+				toPrint += separator
+				toPrint += color.GreenString("Epic link: %v", issueDetails.EpicLink)
 			}
 
 			if len(issueDetails.Labels) > 0 {
-				toPrint += color.CyanString(" | Labels: %v", strings.Join(issueDetails.Labels, ", "))
+				toPrint += separator
+				toPrint += color.BlueString("Labels: %v", strings.Join(issueDetails.Labels, ", "))
 			}
 
 			if issueDetails.Sprint != "" {
-				toPrint += color.GreenString(" | Sprint: %v", issueDetails.Sprint)
+				toPrint += separator
+				toPrint += color.GreenString("Sprint: %v", issueDetails.Sprint)
 			}
 
 			if issueDetails.Resolved {
@@ -310,7 +321,7 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails, is
 }
 
 func printAverageByStatus(totalDurationByStatusMap map[string]time.Duration, wipDuration time.Duration) {
-	fmt.Printf("\n> Average by Status\n")
+	title("\n> Average by Status\n")
 	for k, v := range totalDurationByStatusMap {
 		statusPercent := float64(v*100) / float64(wipDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
@@ -318,7 +329,7 @@ func printAverageByStatus(totalDurationByStatusMap map[string]time.Duration, wip
 }
 
 func printAverageByStatusType(totalDurationByStatusTypeMap map[string]time.Duration, totalDuration time.Duration) {
-	fmt.Printf("\n> Average by Status Type\n")
+	title("\n> Average by Status Type\n")
 	for k, v := range totalDurationByStatusTypeMap {
 		statusPercent := float64(v*100) / float64(totalDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", k, statusPercent, v)
@@ -327,7 +338,7 @@ func printAverageByStatusType(totalDurationByStatusTypeMap map[string]time.Durat
 
 func printWIP(wipMonthly int, totalWipDays int, startDate, endDate time.Time) {
 	weekDays := countWeekDays(startDate, endDate)
-	fmt.Printf("\n> WIP\n")
+	title("\n> WIP\n")
 	fmt.Printf("Monthly: %v tasks\n", wipMonthly)
 	if totalWipDays > 0 {
 		fmt.Printf("Average: %.2f tasks\n", float64(totalWipDays)/float64(weekDays))
@@ -335,7 +346,7 @@ func printWIP(wipMonthly int, totalWipDays int, startDate, endDate time.Time) {
 }
 
 func printThroughput(throughputMonthly int, issueTypeMap map[string]int) {
-	fmt.Printf("\n> Throughput\n")
+	title("\n> Throughput\n")
 	fmt.Printf("Total: %v tasks delivered\n", throughputMonthly)
 	fmt.Printf("By issue type:\n")
 	for key, value := range issueTypeMap {
@@ -344,7 +355,7 @@ func printThroughput(throughputMonthly int, issueTypeMap map[string]int) {
 }
 
 func printLeadTime(totalWipDays int, throughputMonthly int, issueTypeLeadTimeMap map[string]float64, issueTypeConfidenceMap map[string]float64) {
-	fmt.Printf("\n> Lead time\n")
+	title("\n> Lead time\n")
 	fmt.Printf("Total: %v days\n", math.Round(float64(totalWipDays)/float64(throughputMonthly)))
 	fmt.Printf("By issue type:\n")
 	for issueType, leadTime := range issueTypeLeadTimeMap {
@@ -353,7 +364,7 @@ func printLeadTime(totalWipDays int, throughputMonthly int, issueTypeLeadTimeMap
 }
 
 func printDataForScaterplot(issueTypeMap map[string]int, issueDetailsMap map[string]IssueDetails, issueTypeConfidenceMap map[string]float64) {
-	fmt.Printf("\n> Data for scaterplot\n")
+	title("\n> Data for scaterplot\n")
 	for issueType := range issueTypeMap {
 		fmt.Printf(">> %v\n", issueType)
 		for _, v := range issueDetailsMap {

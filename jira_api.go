@@ -120,3 +120,7 @@ func containsStatus(statuses []string, status string) bool {
 
 	return false
 }
+
+func statusIsWip(status string) bool {
+	return containsStatus(append(BoardCfg.WipStatus, BoardCfg.IdleStatus...), status)
+}
