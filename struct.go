@@ -26,7 +26,7 @@ type IssueDetails struct {
 	Summary   string
 	StartDate time.Time
 	EndDate   time.Time
-	WIP       int
+	WIP       time.Duration
 	EpicLink  string
 	IssueType string
 	Resolved  bool
