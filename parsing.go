@@ -27,3 +27,16 @@ func formatBrDate(date time.Time) string {
 
 	return date.Format(brDateFormat)
 }
+
+func formatColumns(columns []string) string {
+	str := ""
+
+	for index, col := range columns {
+		str += "'" + col + "'"
+		if index < len(columns)-1 {
+			str += ","
+		}
+	}
+
+	return str
+}
