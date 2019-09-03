@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"github.com/andygrunwald/go-jira"
 	"github.com/docopt/docopt-go"
+	"github.com/hako/durafmt"
 	"time"
 )
 
@@ -69,8 +70,9 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 	for _, issue := range issues {
 		issueDetails := getIssueDetails(issue)
 
-		wipTransitionTime := time.Time(issue.Fields.Created)
-		lastTransitionTime := time.Time(issue.Fields.Created)
+		issueCreationTime := time.Time(issue.Fields.Created)
+		wipTransitionTime := issueCreationTime
+		lastTransitionTime := issueCreationTime
 
 		if CLParameters.Debug {
 			title("\n%s\n", issue.Key)
@@ -87,6 +89,11 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 					// Timestamp when the transition happened
 					transitionTime, _ := history.CreatedTime()
 
+					if CLParameters.Debug {
+						info("%s -> %s\n", item.FromString, item.ToString)
+						info("%s -> %s", formatBrDateWithTime(lastTransitionTime), formatBrDateWithTime(transitionTime))
+					}
+
 					// Calculates time difference between transitions subtracting weekend days
 					transitionDuration := transitionTime.Sub(lastTransitionTime)
 					weekendDays := countWeekendDays(lastTransitionTime, transitionTime)
@@ -94,9 +101,13 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 						transitionDuration -= time.Duration(weekendDays) * time.Hour * 24
 					}
 
+					if CLParameters.Debug {
+						warn(" [%s]\n", durafmt.Parse(transitionDuration))
+					}
+
 					if containsStatus(wipStatus, item.FromString) {
 						// Mapping var to calculate total WIP of the issue
-						if wipTransitionTime == time.Time(issue.Fields.Created) {
+						if wipTransitionTime == issueCreationTime {
 							wipTransitionTime = transitionTime
 						}
 						// Adding it to the total count only if in WIP/Idle
