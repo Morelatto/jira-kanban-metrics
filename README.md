@@ -45,5 +45,6 @@ endDate       End date in dd/mm/yyyy format.
 "OpenStatus":   ["BACKLOG", "PRIORIZADA", "OPEN"],
 "WipStatus":    ["IN PROGRESS", "TEST"],
 "IdleStatus":   ["DEV DONE", "TEST DONE", "DEPENDÊNCIA EXTERNA"],
-"DoneStatus":   ["DONE"]
+"DoneStatus":   ["DONE"],
+"CustomFields": []
 ```

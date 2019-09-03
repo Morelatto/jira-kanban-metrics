@@ -11,14 +11,15 @@ var CLParameters struct {
 }
 
 var BoardCfg struct {
-	JiraUrl    string
-	Login      string
-	Password   string
-	Project    string
-	OpenStatus []string
-	WipStatus  []string
-	IdleStatus []string
-	DoneStatus []string
+	JiraUrl      string
+	Login        string
+	Password     string
+	Project      string
+	OpenStatus   []string
+	WipStatus    []string
+	IdleStatus   []string
+	DoneStatus   []string
+	CustomFields []string
 }
 
 type IssueDetails struct {
@@ -32,4 +33,5 @@ type IssueDetails struct {
 	Resolved         bool
 	Sprint           string
 	Labels           []string
+	CustomFields     []string
 }

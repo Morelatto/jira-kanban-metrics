@@ -64,5 +64,38 @@ func getIssueDetails(issue jira.Issue) IssueDetails {
 		IssueType:        issue.Fields.Type.Name,
 		Resolved:         !time.Time(issue.Fields.Resolutiondate).IsZero(),
 		Labels:           issue.Fields.Labels,
+		CustomFields:     getCustomFields(issue),
 	}
+}
+
+func getCustomFields(issue jira.Issue) []string {
+	var customFields []string
+	if len(BoardCfg.CustomFields) != 0 {
+		for _, custom := range BoardCfg.CustomFields {
+			value := getCustomFieldValue(custom, issue.ID)
+			if value != "" {
+				customFields = append(customFields, value)
+			}
+		}
+	}
+	return customFields
+}
+
+func getCustomFieldValue(customField, issueId string) string {
+	fields, res, err := JiraClient.Issue.GetCustomFields(issueId)
+	if err != nil {
+		return ""
+	}
+	if res.StatusCode != 200 {
+		fmt.Println("Response Code: " + res.Status)
+		bodyBytes, _ := ioutil.ReadAll(res.Body)
+		fmt.Println("Body: " + string(bodyBytes))
+	} else {
+		for name, value := range fields {
+			if name == customField && value != "<nil>" {
+				return value
+			}
+		}
+	}
+	return ""
 }

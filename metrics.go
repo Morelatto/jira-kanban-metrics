@@ -32,6 +32,10 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 				toPrint += separator
 				toPrint += color.GreenString("Sprint: %v", issueDetails.Sprint)
 			}
+			if len(issueDetails.CustomFields) > 0 {
+				toPrint += separator
+				toPrint += color.CyanString("Custom Fields: %v", strings.Join(issueDetails.CustomFields, ", "))
+			}
 			if issueDetails.Resolved {
 				toPrint += color.YellowString(" (Done)")
 			}
