@@ -19,7 +19,7 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 			toPrint += color.WhiteString(issueDetails.Summary) + separator
 			toPrint += color.YellowString("Start: %s", startDate) + separator
 			toPrint += color.YellowString("End: %s", endDate) + separator
-			toPrint += color.WhiteString("WIP: %s", durafmt.Parse(issueDetails.WIP))
+			toPrint += color.WhiteString("WIP: %s", durafmt.Parse(getTotalWip(issueDetails.DurationByStatus)))
 			if issueDetails.EpicLink != "" {
 				toPrint += separator
 				toPrint += color.GreenString("Epic link: %v", issueDetails.EpicLink)
@@ -41,7 +41,25 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 	}
 }
 
-func printAverageByStatus(totalDurationByStatusMap map[string]time.Duration, totalWipDuration time.Duration) {
+func getTotalWip(durationByStatus map[string]time.Duration) time.Duration {
+	var totalWip time.Duration
+	for status, duration := range durationByStatus {
+		if getIssueTypeByStatus(status) == "Wip" {
+			totalWip += duration
+		}
+	}
+	return totalWip
+}
+
+func printAverageByStatus(issueDetailsMapByType map[string][]IssueDetails, totalWipDuration time.Duration) {
+	totalDurationByStatusMap := make(map[string]time.Duration)
+	for _, issueDetailsArray := range issueDetailsMapByType {
+		for _, issueDetails := range issueDetailsArray {
+			for status, duration := range issueDetails.DurationByStatus {
+				totalDurationByStatusMap[status] += duration
+			}
+		}
+	}
 	title("\n> Average by Status\n")
 	for status, totalDuration := range totalDurationByStatusMap {
 		statusPercent := float64(totalDuration*100) / float64(totalWipDuration)
@@ -49,24 +67,33 @@ func printAverageByStatus(totalDurationByStatusMap map[string]time.Duration, tot
 	}
 }
 
-func printAverageByStatusType(totalDurationByStatusMap map[string]time.Duration, totalWipDuration time.Duration) {
+func printAverageByStatusType(issueDetailsMapByType map[string][]IssueDetails, totalWipDuration time.Duration) {
 	totalDurationByStatusTypeMap := make(map[string]time.Duration)
-	for status, totalDuration := range totalDurationByStatusMap {
-		if containsStatus(BoardCfg.OpenStatus, status) {
-			totalDurationByStatusTypeMap["Open"] += totalDuration
-		} else if containsStatus(BoardCfg.WipStatus, status) {
-			totalDurationByStatusTypeMap["Wip"] += totalDuration
-		} else if containsStatus(BoardCfg.IdleStatus, status) {
-			totalDurationByStatusTypeMap["Idle"] += totalDuration
-		} else if containsStatus(BoardCfg.DoneStatus, status) {
-			totalDurationByStatusTypeMap["Done"] += totalDuration
+	for _, issueDetailsArray := range issueDetailsMapByType {
+		for _, issueDetails := range issueDetailsArray {
+			for status, duration := range issueDetails.DurationByStatus {
+				totalDurationByStatusTypeMap[getIssueTypeByStatus(status)] += duration
+			}
 		}
 	}
-
 	title("\n> Average by Status Type\n")
 	for statusType, totalDuration := range totalDurationByStatusTypeMap {
 		statusPercent := float64(totalDuration*100) / float64(totalWipDuration)
 		fmt.Printf("%v = %.2f%% [%v] \n", statusType, statusPercent, totalDuration)
+	}
+}
+
+func getIssueTypeByStatus(status string) string {
+	if containsStatus(BoardCfg.OpenStatus, status) {
+		return "Open"
+	} else if containsStatus(BoardCfg.WipStatus, status) {
+		return "Wip"
+	} else if containsStatus(BoardCfg.IdleStatus, status) {
+		return "Idle"
+	} else if containsStatus(BoardCfg.DoneStatus, status) {
+		return "Done"
+	} else {
+		return "Not Mapped"
 	}
 }
 
@@ -93,8 +120,9 @@ func printLeadTime(totalWipDuration time.Duration, throughputMonthly int, issueD
 		var wipDays []float64
 		var totalWipByType time.Duration
 		for _, issueDetails := range issueDetailsArray {
-			totalWipByType += issueDetails.WIP
-			wipDays = append(wipDays, float64(issueDetails.WIP))
+			issueWip := getTotalWip(issueDetails.DurationByStatus)
+			totalWipByType += issueWip
+			wipDays = append(wipDays, float64(issueWip))
 		}
 		totalWipAverageByIssueType := float64(totalWipByType) / float64(len(issueDetailsArray))
 		issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType

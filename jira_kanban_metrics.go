@@ -63,15 +63,14 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 
 	var totalWipDuration time.Duration
 	var issueDetailsMapByType = make(map[string][]IssueDetails)
-	var totalDurationByStatusMap = make(map[string]time.Duration)
 	var notMappedStatus []string
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range issues {
-		var issueDetails IssueDetails
-		var lastToStatus string
-		var wipTransitionTime time.Time
-		var lastTransitionTime = time.Time(issue.Fields.Created)
+		issueDetails := getIssueDetails(issue)
+
+		wipTransitionTime := time.Time(issue.Fields.Created)
+		lastTransitionTime := time.Time(issue.Fields.Created)
 
 		if CLParameters.Debug {
 			title("\n%s\n", issue.Key)
@@ -88,11 +87,6 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 					// Timestamp when the transition happened
 					transitionTime, _ := history.CreatedTime()
 
-					// Mapping var to calculate total WIP of the issue
-					if wipTransitionTime.IsZero() && containsStatus(wipStatus, item.ToString) {
-						wipTransitionTime = transitionTime
-					}
-
 					// Calculates time difference between transitions subtracting weekend days
 					transitionDuration := transitionTime.Sub(lastTransitionTime)
 					weekendDays := countWeekendDays(lastTransitionTime, transitionTime)
@@ -100,11 +94,14 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 						transitionDuration -= time.Duration(weekendDays) * time.Hour * 24
 					}
 
-					// Adding it to the total count only if in WIP/Idle
 					if containsStatus(wipStatus, item.FromString) {
+						// Mapping var to calculate total WIP of the issue
+						if wipTransitionTime == time.Time(issue.Fields.Created) {
+							wipTransitionTime = transitionTime
+						}
+						// Adding it to the total count only if in WIP/Idle
 						totalWipDuration += transitionDuration
-						issueDetails.WIP += transitionDuration
-						totalDurationByStatusMap[item.FromString] += transitionDuration
+						issueDetails.DurationByStatus[item.FromString] += transitionDuration
 					}
 
 					// Check if status is not mapped on cfg to warn the user
@@ -113,7 +110,6 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 					}
 
 					// Update vars for next iteration
-					lastToStatus = item.ToString
 					lastTransitionTime = transitionTime
 				} else if item.Field == "Epic Link" {
 					issueDetails.EpicLink = item.ToString
@@ -122,19 +118,8 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 				}
 			}
 		}
-
-		issueDetails.Name = issue.Key
-		issueDetails.Summary = issue.Fields.Summary
-		if wipTransitionTime.IsZero() {
-			issueDetails.StartDate = time.Time(issue.Fields.Created)
-		} else {
-			issueDetails.StartDate = wipTransitionTime
-		}
+		issueDetails.StartDate = wipTransitionTime
 		issueDetails.EndDate = lastTransitionTime
-		issueDetails.IssueType = issue.Fields.Type.Name
-		issueDetails.Resolved = containsStatus(BoardCfg.DoneStatus, lastToStatus)
-		issueDetails.Labels = issue.Fields.Labels
-
 		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
 
@@ -145,11 +130,15 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) {
 		}
 	}
 
+	printMetrics(issueDetailsMapByType, totalWipDuration, len(issues))
+}
+
+func printMetrics(issueDetailsMapByType map[string][]IssueDetails, totalWipDuration time.Duration, totalIssues int) {
 	printIssueDetailsByType(issueDetailsMapByType)
-	printAverageByStatus(totalDurationByStatusMap, totalWipDuration)
-	printAverageByStatusType(totalDurationByStatusMap, totalWipDuration)
-	printWIP(totalWipDuration, len(issues), countWeekDays(parseDate(CLParameters.StartDate), parseDate(CLParameters.EndDate)))
-	printThroughput(len(issues), issueDetailsMapByType)
-	printLeadTime(totalWipDuration, len(issues), issueDetailsMapByType)
+	printAverageByStatus(issueDetailsMapByType, totalWipDuration)
+	printAverageByStatusType(issueDetailsMapByType, totalWipDuration)
+	printWIP(totalWipDuration, totalIssues, countWeekDays(parseDate(CLParameters.StartDate), parseDate(CLParameters.EndDate)))
+	printThroughput(totalIssues, issueDetailsMapByType)
+	printLeadTime(totalWipDuration, totalIssues, issueDetailsMapByType)
 	// TODO print scaterplot
 }

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var JiraClient jira.Client
@@ -53,4 +54,15 @@ func searchIssues(jql string) []jira.Issue {
 		return nil
 	}
 	return issues
+}
+
+func getIssueDetails(issue jira.Issue) IssueDetails {
+	return IssueDetails{
+		Name:             issue.Key,
+		Summary:          issue.Fields.Summary,
+		DurationByStatus: make(map[string]time.Duration),
+		IssueType:        issue.Fields.Type.Name,
+		Resolved:         !time.Time(issue.Fields.Resolutiondate).IsZero(),
+		Labels:           issue.Fields.Labels,
+	}
 }

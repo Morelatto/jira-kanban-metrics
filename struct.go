@@ -22,14 +22,14 @@ var BoardCfg struct {
 }
 
 type IssueDetails struct {
-	Name      string
-	Summary   string
-	StartDate time.Time
-	EndDate   time.Time
-	WIP       time.Duration
-	EpicLink  string
-	IssueType string
-	Resolved  bool
-	Sprint    string
-	Labels    []string
+	Name             string
+	Summary          string
+	StartDate        time.Time
+	EndDate          time.Time
+	DurationByStatus map[string]time.Duration
+	EpicLink         string
+	IssueType        string
+	Resolved         bool
+	Sprint           string
+	Labels           []string
 }
