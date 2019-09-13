@@ -29,11 +29,27 @@ func authJiraClient() {
 	JiraClient = *client
 }
 
-func getDoneIssuesJqlSearch(start, end string, project string, doneStatuses []string) string {
+func getDoneIssuesJqlSearch() string {
 	jqlSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
-		project, formatColumns(doneStatuses), formatJiraDate(parseDate(start)), formatJiraDate(parseDate(end)))
+		BoardCfg.Project,
+		formatColumns(BoardCfg.DoneStatus),
+		formatJiraDate(parseDate(CLParameters.StartDate)),
+		formatJiraDate(parseDate(CLParameters.EndDate)))
 	if CLParameters.Debug {
 		title("WIP/Throughput JQL: %s\n", jqlSearch)
+	}
+	return jqlSearch
+}
+
+func getNotDoneIssuesJqlSearch() string {
+	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND status CHANGED TO (%v) DURING('%v', '%v') AND status NOT IN (%v)",
+		BoardCfg.Project,
+		formatColumns(append(append(BoardCfg.OpenStatus, BoardCfg.WipStatus...), BoardCfg.IdleStatus...)),
+		formatJiraDate(parseDate(CLParameters.StartDate)),
+		formatJiraDate(parseDate(CLParameters.EndDate)),
+		formatColumns(BoardCfg.DoneStatus))
+	if CLParameters.Debug {
+		title("Not Done JQL: %s\n", jqlSearch)
 	}
 	return jqlSearch
 }

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/hako/durafmt"
-	"github.com/zchee/color" // TODO test colors on windows and terminator
+	"github.com/zchee/color"
 	"math"
 	"strings"
 	"time"
@@ -103,27 +103,23 @@ func printAverageByStatusType(issueDetailsMapByType map[string][]IssueDetails) {
 	}
 }
 
-func getIssueTypeByStatus(status string) string {
-	if containsStatus(BoardCfg.OpenStatus, status) {
-		return "Open"
-	} else if containsStatus(BoardCfg.WipStatus, status) {
-		return "Wip"
-	} else if containsStatus(BoardCfg.IdleStatus, status) {
-		return "Idle"
-	} else if containsStatus(BoardCfg.DoneStatus, status) {
-		return "Done"
-	} else {
-		return "Not Mapped"
+func printWIP(issueDetailsMapByType map[string][]IssueDetails, weekDays int) {
+	var wipMonthly int
+	var totalWipDuration time.Duration
+	for _, issueDetailsArray := range issueDetailsMapByType {
+		for _, issueDetails := range issueDetailsArray {
+			totalWipDuration += issueDetails.WIP
+			if issueDetails.WIP.Hours() > 1 {
+				wipMonthly++
+			}
+		}
 	}
-}
-
-func printWIP(totalWipDuration time.Duration, wipMonthly, weekDays int) {
 	title("\n> WIP\n")
 	fmt.Printf("Monthly: ")
-	warn("%d tasks\n", wipMonthly)
-	totalWipDays := totalWipDuration.Hours() / 24
-	fmt.Printf("Average: ")
-	warn("%.2f tasks\n", totalWipDays/float64(weekDays))
+	warn("%d tasks were in WIP\n", wipMonthly)
+	//totalWipDays := int(math.Round(totalWipDuration.Hours() / 24))
+	//fmt.Printf("Average: ")
+	//warn("%d tasks\n", wipMonthly/totalWipDays)
 }
 
 func printThroughput(issueDetailsMapByType map[string][]IssueDetails) {

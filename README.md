@@ -39,8 +39,8 @@ endDate       End date in dd/mm/yyyy format.
 ##### jira_board.cfg
 ```
 "JiraUrl":      "http://jira.intranet/jira",
-"Login":        "username",
-"Password":     "p4ssw0rd",
+"Login":        "",
+"Password":     "",
 "Project":      "PSQUATRO",
 "OpenStatus":   ["BACKLOG", "PRIORIZADA", "OPEN"],
 "WipStatus":    ["IN PROGRESS", "TEST"],

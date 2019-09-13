@@ -56,3 +56,24 @@ func statusIsNotMapped(status string) bool {
 	}
 	return true
 }
+
+func getIssueTypeByStatus(status string) string {
+	if containsStatus(BoardCfg.OpenStatus, status) {
+		return "Open"
+	} else if containsStatus(BoardCfg.WipStatus, status) {
+		return "Wip"
+	} else if containsStatus(BoardCfg.IdleStatus, status) {
+		return "Idle"
+	} else if containsStatus(BoardCfg.DoneStatus, status) {
+		return "Done"
+	} else {
+		return "Not Mapped"
+	}
+}
+
+func mergeMaps(map1 map[string][]IssueDetails, map2 map[string][]IssueDetails) map[string][]IssueDetails {
+	for issueType, issueDetailsArray := range map2 {
+		map1[issueType] = append(map1[issueType], issueDetailsArray...)
+	}
+	return map1
+}
