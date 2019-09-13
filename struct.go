@@ -25,8 +25,10 @@ var BoardCfg struct {
 type IssueDetails struct {
 	Name             string
 	Summary          string
-	StartDate        time.Time
-	EndDate          time.Time
+	CreatedDate      time.Time
+	ToWipDate        time.Time
+	ResolvedDate     time.Time
+	WIP              time.Duration
 	DurationByStatus map[string]time.Duration
 	EpicLink         string
 	IssueType        string
@@ -34,4 +36,5 @@ type IssueDetails struct {
 	Sprint           string
 	Labels           []string
 	CustomFields     []string
+	LastStatus       string
 }

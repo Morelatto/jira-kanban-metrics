@@ -14,12 +14,32 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		title("\n>> %s\n", issueType)
 		for _, issueDetails := range issueDetailsArray {
-			startDate, endDate := formatBrDate(issueDetails.StartDate), formatBrDate(issueDetails.EndDate)
 			toPrint := color.RedString(issueDetails.Name) + separator
 			toPrint += color.WhiteString(issueDetails.Summary) + separator
-			toPrint += color.YellowString("Start: %s", startDate) + separator
-			toPrint += color.YellowString("End: %s", endDate) + separator
-			toPrint += color.WhiteString("WIP: %s", durafmt.Parse(getTotalWip(issueDetails.DurationByStatus)))
+			toPrint += color.YellowString("Created: %s", formatBrDate(issueDetails.CreatedDate))
+
+			if issueDetails.ToWipDate != issueDetails.CreatedDate {
+				toPrint += separator
+				toPrint += color.YellowString("To WIP: %s", formatBrDate(issueDetails.ToWipDate))
+			}
+
+			if issueDetails.Resolved {
+				toPrint += separator
+				toPrint += color.YellowString("Resolved: %s", formatBrDate(issueDetails.ResolvedDate))
+			}
+
+			if issueDetails.WIP.Hours() > 1 {
+				toPrint += separator
+
+				var wipDays int
+				if issueDetails.WIP.Hours() < 24 {
+					wipDays = 1
+				} else {
+					wipDays = int(math.Round(issueDetails.WIP.Hours() / 24))
+				}
+				toPrint += color.WhiteString("WIP: %d", wipDays)
+			}
+
 			if issueDetails.EpicLink != "" {
 				toPrint += separator
 				toPrint += color.GreenString("Epic link: %v", issueDetails.EpicLink)
@@ -36,8 +56,8 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 				toPrint += separator
 				toPrint += color.CyanString("Custom Fields: %v", strings.Join(issueDetails.CustomFields, ", "))
 			}
-			if issueDetails.Resolved {
-				toPrint += color.YellowString(" (Done)")
+			if issueDetails.LastStatus != "" {
+				toPrint += color.YellowString(" (%s)", issueDetails.LastStatus)
 			}
 			toPrint += "\n"
 			_, _ = fmt.Fprintf(color.Output, toPrint)
@@ -45,45 +65,41 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 	}
 }
 
-func getTotalWip(durationByStatus map[string]time.Duration) time.Duration {
-	var totalWip time.Duration
-	for status, duration := range durationByStatus {
-		if getIssueTypeByStatus(status) == "Wip" {
-			totalWip += duration
-		}
-	}
-	return totalWip
-}
-
-func printAverageByStatus(issueDetailsMapByType map[string][]IssueDetails, totalWipDuration time.Duration) {
+func printAverageByStatus(issueDetailsMapByType map[string][]IssueDetails) {
 	totalDurationByStatusMap := make(map[string]time.Duration)
+	var totalDuration time.Duration
 	for _, issueDetailsArray := range issueDetailsMapByType {
 		for _, issueDetails := range issueDetailsArray {
 			for status, duration := range issueDetails.DurationByStatus {
 				totalDurationByStatusMap[status] += duration
+				totalDuration += duration
 			}
 		}
 	}
 	title("\n> Average by Status\n")
-	for status, totalDuration := range totalDurationByStatusMap {
-		statusPercent := float64(totalDuration*100) / float64(totalWipDuration)
-		fmt.Printf("%v = %.2f%%\n", status, statusPercent)
+	for status, duration := range totalDurationByStatusMap {
+		statusPercent := float64(duration*100) / float64(totalDuration)
+		fmt.Printf("%v = %.2f%%", status, statusPercent)
+		warn(" [%s]\n", durafmt.Parse(duration))
 	}
 }
 
-func printAverageByStatusType(issueDetailsMapByType map[string][]IssueDetails, totalWipDuration time.Duration) {
+func printAverageByStatusType(issueDetailsMapByType map[string][]IssueDetails) {
+	var totalDuration time.Duration
 	totalDurationByStatusTypeMap := make(map[string]time.Duration)
 	for _, issueDetailsArray := range issueDetailsMapByType {
 		for _, issueDetails := range issueDetailsArray {
 			for status, duration := range issueDetails.DurationByStatus {
 				totalDurationByStatusTypeMap[getIssueTypeByStatus(status)] += duration
+				totalDuration += duration
 			}
 		}
 	}
 	title("\n> Average by Status Type\n")
-	for statusType, totalDuration := range totalDurationByStatusTypeMap {
-		statusPercent := float64(totalDuration*100) / float64(totalWipDuration)
-		fmt.Printf("%v = %.2f%% [%v] \n", statusType, statusPercent, totalDuration)
+	for statusType, duration := range totalDurationByStatusTypeMap {
+		statusPercent := float64(duration*100) / float64(totalDuration)
+		fmt.Printf("%v = %.2f%%", statusType, statusPercent)
+		warn(" [%s]\n", durafmt.Parse(duration))
 	}
 }
 
@@ -103,40 +119,57 @@ func getIssueTypeByStatus(status string) string {
 
 func printWIP(totalWipDuration time.Duration, wipMonthly, weekDays int) {
 	title("\n> WIP\n")
-	fmt.Printf("Monthly: %v tasks\n", wipMonthly)
+	fmt.Printf("Monthly: ")
+	warn("%d tasks\n", wipMonthly)
 	totalWipDays := totalWipDuration.Hours() / 24
-	fmt.Printf("Average: %.2f tasks\n", totalWipDays/float64(weekDays))
+	fmt.Printf("Average: ")
+	warn("%.2f tasks\n", totalWipDays/float64(weekDays))
 }
 
-func printThroughput(throughputMonthly int, issueDetailsMapByType map[string][]IssueDetails) {
-	title("\n> Throughput\n")
-	fmt.Printf("Total: %v tasks delivered\n", throughputMonthly)
-	fmt.Printf("By issue type:\n")
+func printThroughput(issueDetailsMapByType map[string][]IssueDetails) {
+	var totalThroughput int
+	throughputMap := make(map[string]int)
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
-		issueCount := len(issueDetailsArray)
-		fmt.Printf("- %v: %v tasks (%v%%)\n", issueType, issueCount, (issueCount*100)/throughputMonthly)
+		for _, issueDetails := range issueDetailsArray {
+			if issueDetails.Resolved {
+				throughputMap[issueType]++
+				totalThroughput++
+			}
+		}
+	}
+	title("\n> Throughput\n")
+	fmt.Printf("Total: ")
+	warn("%d tasks delivered\n", totalThroughput)
+	fmt.Printf("By issue type:\n")
+	for issueType, throughput := range throughputMap {
+		fmt.Printf("- %v: %v tasks", issueType, throughput)
+		warn(" (%d%%)\n", (throughput*100)/totalThroughput)
 	}
 }
 
-func printLeadTime(totalWipDuration time.Duration, throughputMonthly int, issueDetailsMapByType map[string][]IssueDetails) {
-	var issueTypeLeadTimeMap = make(map[string]float64)
+func printLeadTime(issueDetailsMapByType map[string][]IssueDetails) {
+	var throughputMonthly int
+	var totalWipDuration time.Duration
+	var leadTimeByTypeMap = make(map[string]float64)
+
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
-		var wipDays []float64
-		var totalWipByType time.Duration
+		var wipByType time.Duration
 		for _, issueDetails := range issueDetailsArray {
-			issueWip := getTotalWip(issueDetails.DurationByStatus)
-			totalWipByType += issueWip
-			wipDays = append(wipDays, float64(issueWip))
+			wipByType += issueDetails.WIP
 		}
-		totalWipAverageByIssueType := float64(totalWipByType) / float64(len(issueDetailsArray))
-		issueTypeLeadTimeMap[issueType] = totalWipAverageByIssueType
+		typeThroughput := len(issueDetailsArray)
+		throughputMonthly += typeThroughput
+		totalWipDuration += wipByType
+		leadTimeByTypeMap[issueType] = float64(wipByType) / float64(typeThroughput)
 	}
 
 	title("\n> Lead time\n")
-	totalWipDays := totalWipDuration.Hours() / 24
-	fmt.Printf("Average: %v days\n", math.Round(totalWipDays/float64(throughputMonthly)))
+	fmt.Printf("Average: ")
+	wipDays := int(math.Round(totalWipDuration.Hours() / 24))
+	warn("%d days\n", wipDays/throughputMonthly)
 	fmt.Printf("By issue type:\n")
-	for issueType, leadTime := range issueTypeLeadTimeMap {
-		fmt.Printf("- %v: %v days\n", issueType, math.Round(time.Duration(leadTime).Hours()/24))
+	for issueType, leadTime := range leadTimeByTypeMap {
+		fmt.Printf("- %v: ", issueType)
+		warn("%v days\n", math.Round(time.Duration(leadTime).Hours()/24))
 	}
 }

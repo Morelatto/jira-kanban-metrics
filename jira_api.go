@@ -29,9 +29,9 @@ func authJiraClient() {
 	JiraClient = *client
 }
 
-func getJqlSearch(start, end string, project string, statuses []string) string {
-	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
-		project, formatColumns(statuses), formatJiraDate(parseDate(start)), formatJiraDate(parseDate(end)))
+func getDoneIssuesJqlSearch(start, end string, project string, doneStatuses []string) string {
+	jqlSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
+		project, formatColumns(doneStatuses), formatJiraDate(parseDate(start)), formatJiraDate(parseDate(end)))
 	if CLParameters.Debug {
 		title("WIP/Throughput JQL: %s\n", jqlSearch)
 	}
@@ -60,9 +60,9 @@ func getIssueDetails(issue jira.Issue) IssueDetails {
 	return IssueDetails{
 		Name:             issue.Key,
 		Summary:          issue.Fields.Summary,
+		CreatedDate:      time.Time(issue.Fields.Created),
 		DurationByStatus: make(map[string]time.Duration),
 		IssueType:        issue.Fields.Type.Name,
-		Resolved:         !time.Time(issue.Fields.Resolutiondate).IsZero(),
 		Labels:           issue.Fields.Labels,
 		CustomFields:     getCustomFields(issue),
 	}
