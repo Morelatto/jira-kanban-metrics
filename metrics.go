@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/hako/durafmt"
 	"github.com/zchee/color"
-	"math"
 	"strings"
 	"time"
 )
@@ -35,7 +34,7 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 				if issueDetails.WIP.Hours() < 24 {
 					wipDays = 1
 				} else {
-					wipDays = int(math.Round(issueDetails.WIP.Hours() / 24))
+					wipDays = getDays(issueDetails.WIP)
 				}
 				toPrint += color.WhiteString("WIP: %d", wipDays)
 			}
@@ -161,11 +160,11 @@ func printLeadTime(issueDetailsMapByType map[string][]IssueDetails) {
 
 	title("\n> Lead time\n")
 	fmt.Printf("Average: ")
-	wipDays := int(math.Round(totalWipDuration.Hours() / 24))
+	wipDays := getDays(totalWipDuration)
 	warn("%d days\n", wipDays/throughputMonthly)
 	fmt.Printf("By issue type:\n")
 	for issueType, leadTime := range leadTimeByTypeMap {
 		fmt.Printf("- %v: ", issueType)
-		warn("%v days\n", math.Round(time.Duration(leadTime).Hours()/24))
+		warn("%d days\n", getDays(time.Duration(leadTime)))
 	}
 }

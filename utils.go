@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"strings"
 	"time"
 )
@@ -76,4 +77,8 @@ func mergeMaps(map1 map[string][]IssueDetails, map2 map[string][]IssueDetails) m
 		map1[issueType] = append(map1[issueType], issueDetailsArray...)
 	}
 	return map1
+}
+
+func getDays(duration time.Duration) int {
+	return int(math.Round(duration.Hours() / 24))
 }

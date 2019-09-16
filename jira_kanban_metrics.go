@@ -64,8 +64,8 @@ func main() {
 	// Add one day to end date limit to include it in time comparisons
 	endDate = endDate.Add(time.Hour * time.Duration(24))
 
-	doneIssuesByTypeMap := extractMetrics(doneIssues, wipStatus, startDate, endDate)
-	notDoneIssuesByTypeMap := extractMetrics(notDoneIssues, wipStatus, startDate, endDate)
+	doneIssuesByTypeMap := extractMetrics(doneIssues, wipStatus)
+	notDoneIssuesByTypeMap := extractMetrics(notDoneIssues, wipStatus)
 
 	printIssueDetailsByType(mergeMaps(doneIssuesByTypeMap, notDoneIssuesByTypeMap))
 	printAverageByStatus(doneIssuesByTypeMap)
@@ -76,7 +76,7 @@ func main() {
 	// TODO print scaterplot
 }
 
-func extractMetrics(issues []jira.Issue, wipStatus []string, startDate, endDate time.Time) map[string][]IssueDetails {
+func extractMetrics(issues []jira.Issue, wipStatus []string) map[string][]IssueDetails {
 	var issueDetailsMapByType = make(map[string][]IssueDetails)
 	var notMappedStatus []string
 
@@ -108,12 +108,7 @@ func extractMetrics(issues []jira.Issue, wipStatus []string, startDate, endDate 
 						info("%s -> %s", formatBrDateWithTime(lastTransitionTime), formatBrDateWithTime(transitionTime))
 					}
 
-					// Calculates time difference between transitions subtracting weekend days
-					transitionDuration := transitionTime.Sub(lastTransitionTime)
-					weekendDays := countWeekendDays(lastTransitionTime, transitionTime)
-					if weekendDays > 0 && transitionDuration != 0 {
-						transitionDuration -= time.Duration(weekendDays) * time.Hour * 24
-					}
+					transitionDuration := getTransitionDuration(lastTransitionTime, transitionTime)
 
 					if CLParameters.Debug {
 						warn(" [%s]", durafmt.Parse(transitionDuration))
@@ -127,14 +122,6 @@ func extractMetrics(issues []jira.Issue, wipStatus []string, startDate, endDate 
 					// Update vars for next iteration
 					lastTransitionTime = transitionTime
 					issueDetails.LastStatus = item.ToString
-
-					// Do not include transition in calculations if outside parameter range
-					//if transitionTime.Before(startDate) || transitionTime.After(endDate) {
-					//	if CLParameters.Debug {
-					//		warn(" [IGNORED]\n")
-					//	}
-					//	continue
-					//}
 
 					if containsStatus(wipStatus, item.FromString) || containsStatus(BoardCfg.DoneStatus, item.ToString) {
 						// Mapping var to calculate total WIP of the issue
@@ -160,6 +147,13 @@ func extractMetrics(issues []jira.Issue, wipStatus []string, startDate, endDate 
 			}
 		}
 
+		// Consider WIP date until now if last status on WIP
+		if !issueDetails.Resolved && containsStatus(wipStatus, issueDetails.LastStatus) {
+			transitionDuration := getTransitionDuration(lastTransitionTime, time.Now())
+			issueDetails.WIP += transitionDuration
+			issueDetails.DurationByStatus[issueDetails.LastStatus] += transitionDuration
+		}
+
 		issueDetails.ToWipDate = wipTransitionTime
 		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
@@ -171,4 +165,18 @@ func extractMetrics(issues []jira.Issue, wipStatus []string, startDate, endDate 
 		}
 	}
 	return issueDetailsMapByType
+}
+
+// Calculates time difference between transitions subtracting weekend days
+func getTransitionDuration(firstTransition time.Time, secondTransition time.Time) time.Duration {
+	transitionDuration := secondTransition.Sub(firstTransition)
+	weekendDays := countWeekendDays(firstTransition, secondTransition)
+	if weekendDays > 0 {
+		if getDays(transitionDuration) >= weekendDays {
+			transitionDuration -= time.Duration(weekendDays) * time.Hour * 24
+		} else {
+			transitionDuration = 0
+		}
+	}
+	return transitionDuration
 }

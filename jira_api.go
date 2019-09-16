@@ -42,9 +42,8 @@ func getDoneIssuesJqlSearch() string {
 }
 
 func getNotDoneIssuesJqlSearch() string {
-	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND status CHANGED TO (%v) DURING('%v', '%v') AND status NOT IN (%v)",
+	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND status CHANGED DURING('%v', '%v') AND status NOT IN (%v)",
 		BoardCfg.Project,
-		formatColumns(append(append(BoardCfg.OpenStatus, BoardCfg.WipStatus...), BoardCfg.IdleStatus...)),
 		formatJiraDate(parseDate(CLParameters.StartDate)),
 		formatJiraDate(parseDate(CLParameters.EndDate)),
 		formatColumns(BoardCfg.DoneStatus))
@@ -100,6 +99,7 @@ func getCustomFields(issue jira.Issue) []string {
 func getCustomFieldValue(customField, issueId string) string {
 	fields, res, err := JiraClient.Issue.GetCustomFields(issueId)
 	if err != nil {
+		warn("Failed to get custom fields for %s\n", issueId)
 		return ""
 	}
 	if res.StatusCode != 200 {
