@@ -13,8 +13,8 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		title("\n>> %s\n", issueType)
 		for _, issueDetails := range issueDetailsArray {
-			toPrint := color.RedString(issueDetails.Name) + separator
-			toPrint += color.WhiteString(issueDetails.Summary) + separator
+			toPrint := color.RedString(issueDetails.Key) + separator
+			toPrint += color.WhiteString(issueDetails.Title) + separator
 			toPrint += color.YellowString("Created: %s", formatBrDate(issueDetails.CreatedDate))
 
 			if issueDetails.ToWipDate != issueDetails.CreatedDate {
@@ -25,6 +25,18 @@ func printIssueDetailsByType(issueDetailsMapByType map[string][]IssueDetails) {
 			if issueDetails.Resolved {
 				toPrint += separator
 				toPrint += color.YellowString("Resolved: %s", formatBrDate(issueDetails.ResolvedDate))
+			}
+
+			if issueDetails.WIPIdle.Hours() > 1 {
+				toPrint += separator
+
+				var wipDays int
+				if issueDetails.WIPIdle.Hours() < 24 {
+					wipDays = 1
+				} else {
+					wipDays = getDays(issueDetails.WIPIdle)
+				}
+				toPrint += color.WhiteString("WIP/Idle: %d", wipDays)
 			}
 
 			if issueDetails.WIP.Hours() > 1 {
@@ -107,15 +119,15 @@ func printWIP(issueDetailsMapByType map[string][]IssueDetails, weekDays int) {
 	var totalWipDuration time.Duration
 	for _, issueDetailsArray := range issueDetailsMapByType {
 		for _, issueDetails := range issueDetailsArray {
-			totalWipDuration += issueDetails.WIP
-			if issueDetails.WIP.Hours() > 1 {
+			totalWipDuration += issueDetails.WIPIdle
+			if issueDetails.WIPIdle.Hours() > 1 {
 				wipMonthly++
 			}
 		}
 	}
-	title("\n> WIP\n")
+	title("\n> WIP/Idle\n")
 	fmt.Printf("Monthly: ")
-	warn("%d tasks were in WIP\n", wipMonthly)
+	warn("%d tasks were in WIP/Idle\n", wipMonthly)
 	//totalWipDays := int(math.Round(totalWipDuration.Hours() / 24))
 	//fmt.Printf("Average: ")
 	//warn("%d tasks\n", wipMonthly/totalWipDays)
@@ -150,7 +162,7 @@ func printLeadTime(issueDetailsMapByType map[string][]IssueDetails) {
 	for issueType, issueDetailsArray := range issueDetailsMapByType {
 		var wipByType time.Duration
 		for _, issueDetails := range issueDetailsArray {
-			wipByType += issueDetails.WIP
+			wipByType += issueDetails.WIPIdle
 		}
 		typeThroughput := len(issueDetailsArray)
 		throughputMonthly += typeThroughput

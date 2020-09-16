@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"github.com/andygrunwald/go-jira"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
-	"time"
 )
 
 var JiraClient jira.Client
@@ -54,33 +54,24 @@ func getNotDoneIssuesJqlSearch() string {
 }
 
 func searchIssues(jql string) []jira.Issue {
-	searchOptions := &jira.SearchOptions{
-		MaxResults: 1000,
-		Expand:     "changelog",
+	log.Printf("JQL: %v", jql)
+	var i = 0
+	var issues []jira.Issue
+	searchOptions := jira.SearchOptions{MaxResults: 100, Expand: "changelog"}
+	for {
+		searchOptions.StartAt = i
+		res, resp, err := JiraClient.Issue.Search(jql, &searchOptions)
+		if err != nil {
+			log.Fatalf("Failed to search issues on jira: %v\nResponse body: %v", err, readResponseBody(resp))
+		}
+		issues = append(issues, res...)
+		i += resp.MaxResults
+		if i >= resp.Total {
+			break
+		}
 	}
-	issues, response, err := JiraClient.Issue.Search(jql, searchOptions)
-	if err != nil {
-		panic(err)
-	}
-	if response.StatusCode != 200 {
-		fmt.Println("Response Code: " + response.Status)
-		bodyBytes, _ := ioutil.ReadAll(response.Body)
-		fmt.Println("Body: " + string(bodyBytes))
-		return nil
-	}
+	log.Printf("Total issues returned: %v", len(issues))
 	return issues
-}
-
-func getIssueDetails(issue jira.Issue) IssueDetails {
-	return IssueDetails{
-		Name:             issue.Key,
-		Summary:          issue.Fields.Summary,
-		CreatedDate:      time.Time(issue.Fields.Created),
-		DurationByStatus: make(map[string]time.Duration),
-		IssueType:        issue.Fields.Type.Name,
-		Labels:           issue.Fields.Labels,
-		CustomFields:     getCustomFields(issue),
-	}
 }
 
 func getCustomFields(issue jira.Issue) []string {

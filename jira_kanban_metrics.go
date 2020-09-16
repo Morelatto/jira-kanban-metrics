@@ -23,31 +23,36 @@ import (
 	"github.com/andygrunwald/go-jira"
 	"github.com/docopt/docopt-go"
 	"github.com/hako/durafmt"
+	"log"
 	"time"
 )
 
 var usage = `Jira kanban metrics
 
 Usage: 
-  jira-kanban-metrics <startDate> <endDate> [--debug]
+  jira-kanban-metrics <start> <end> [--debug]
+  jira-kanban-metrics <JQL> [--debug]
   jira-kanban-metrics -h | --help
   jira-kanban-metrics --version
 
 Arguments:
-  startDate  Start date in dd/mm/yyyy format.
-  endDate    End date in dd/mm/yyyy format.
+  start  Start date in dd/mm/yyyy format.
+  end    End date in dd/mm/yyyy format.
+  JQL    The jql.
 
 Options:
-  --debug    Print debug output [default: false].
+  --debug    Print debug output.
   -h --help  Show this screen.
   --version  Show version.
 `
 
+const version = "1.1"
+
 func main() {
-	arguments, _ := docopt.ParseArgs(usage, nil, "1.0")
+	arguments, _ := docopt.ParseArgs(usage, nil, version)
 	err := arguments.Bind(&CLParameters)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to parse command line arguments: %v", err)
 	}
 
 	loadBoardCfg()
@@ -64,8 +69,16 @@ func main() {
 	// Add one day to end date limit to include it in time comparisons
 	endDate = endDate.Add(time.Hour * time.Duration(24))
 
-	doneIssuesByTypeMap := extractMetrics(doneIssues, wipStatus)
-	notDoneIssuesByTypeMap := extractMetrics(notDoneIssues, wipStatus)
+	doneIssuesByTypeMap, notMapped := extractMetrics(doneIssues, wipStatus)
+	notDoneIssuesByTypeMap, notMapped2 := extractMetrics(notDoneIssues, wipStatus)
+	notMapped = append(notMapped, notMapped2...)
+
+	if len(notMapped) > 0 {
+		warn("\nThe following status were found but not mapped in board.cfg:\n")
+		for _, status := range notMapped {
+			fmt.Println(status)
+		}
+	}
 
 	printIssueDetailsByType(mergeMaps(doneIssuesByTypeMap, notDoneIssuesByTypeMap))
 	printAverageByStatus(doneIssuesByTypeMap)
@@ -76,42 +89,61 @@ func main() {
 	// TODO print scaterplot
 }
 
-func extractMetrics(issues []jira.Issue, wipStatus []string) map[string][]IssueDetails {
+type TransitionDetails struct {
+	Timestamp          time.Time
+	StatusFrom         string
+	StatusTo           string
+	PreviousTransition *TransitionDetails
+}
+
+func (t *TransitionDetails) getTotalDuration() time.Duration {
+	return getTransitionDuration(t.PreviousTransition.Timestamp, t.Timestamp)
+}
+
+func (t *TransitionDetails) PrintFrom() {
+	info("%s %s\n", formatBrDateWithTime(t.PreviousTransition.Timestamp), t.StatusFrom)
+}
+
+func (t *TransitionDetails) PrintTo() {
+	info("%s %s", formatBrDateWithTime(t.Timestamp), t.StatusTo)
+	if t.PreviousTransition != nil {
+		warn(" [%s]", durafmt.Parse(t.getTotalDuration()))
+	}
+	fmt.Println()
+}
+
+func extractMetrics(issues []jira.Issue, wipStatus []string) (map[string][]IssueDetails, []string) {
 	var issueDetailsMapByType = make(map[string][]IssueDetails)
 	var notMappedStatus []string
 
 	// Transitions on the board: Issue -> Changelog -> Histories -> Items -> Field:Status
 	for _, issue := range issues {
-		issueDetails := getIssueDetails(issue)
+		issueDetails := New(issue)
 
 		issueCreationTime := time.Time(issue.Fields.Created)
 		wipTransitionTime := issueCreationTime
 		lastTransitionTime := issueCreationTime
 
-		if CLParameters.Debug {
-			title("\n%s\n", issue.Key)
+		Debug(issue.Key)
+		var previousTransition = &TransitionDetails{
+			Timestamp: time.Time(issue.Fields.Created),
+			StatusTo:  "Open",
 		}
-
+		previousTransition.PrintTo()
 		for _, history := range issue.Changelog.Histories {
 			for _, item := range history.Items {
-				// Ignore transitions to the same status
-				if item.From == item.To {
-					continue
-				}
-
 				if item.Field == "status" {
-					// Timestamp when the transition happened
 					transitionTime, _ := history.CreatedTime()
-
-					if CLParameters.Debug {
-						info("%s -> %s\n", item.FromString, item.ToString)
-						info("%s -> %s", formatBrDateWithTime(lastTransitionTime), formatBrDateWithTime(transitionTime))
-					}
-
 					transitionDuration := getTransitionDuration(lastTransitionTime, transitionTime)
 
+					var t = TransitionDetails{
+						Timestamp:          transitionTime,
+						StatusFrom:         item.FromString,
+						StatusTo:           item.ToString,
+						PreviousTransition: previousTransition,
+					}
 					if CLParameters.Debug {
-						warn(" [%s]", durafmt.Parse(transitionDuration))
+						t.PrintTo()
 					}
 
 					// Check if status is not mapped on cfg to warn the user
@@ -120,6 +152,7 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) map[string][]IssueD
 					}
 
 					// Update vars for next iteration
+					previousTransition = &t
 					lastTransitionTime = transitionTime
 					issueDetails.LastStatus = item.ToString
 
@@ -129,16 +162,18 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) map[string][]IssueD
 							wipTransitionTime = transitionTime
 						}
 						// Mapping only WIP transitions to use for metrics later
-						issueDetails.WIP += transitionDuration
+						issueDetails.WIPIdle += transitionDuration
 						issueDetails.DurationByStatus[item.FromString] += transitionDuration
+
+						if containsStatus(BoardCfg.WipStatus, item.ToString) || containsStatus(BoardCfg.DoneStatus, item.ToString) {
+							issueDetails.WIP += transitionDuration
+						}
 					}
 
 					if containsStatus(BoardCfg.DoneStatus, item.ToString) {
 						issueDetails.Resolved = true
 						issueDetails.ResolvedDate = transitionTime
 					}
-
-					warn("\n")
 				} else if item.Field == "Epic Link" {
 					issueDetails.EpicLink = item.ToString
 				} else if item.Field == "Sprint" {
@@ -146,25 +181,22 @@ func extractMetrics(issues []jira.Issue, wipStatus []string) map[string][]IssueD
 				}
 			}
 		}
+		issueDetails.TransitionDetails = previousTransition
 
 		// Consider WIP date until now if last status on WIP
 		if !issueDetails.Resolved && containsStatus(wipStatus, issueDetails.LastStatus) {
 			transitionDuration := getTransitionDuration(lastTransitionTime, time.Now())
-			issueDetails.WIP += transitionDuration
+			issueDetails.WIPIdle += transitionDuration
 			issueDetails.DurationByStatus[issueDetails.LastStatus] += transitionDuration
+			if containsStatus(BoardCfg.WipStatus, issueDetails.LastStatus) {
+				issueDetails.WIP += transitionDuration
+			}
 		}
-
 		issueDetails.ToWipDate = wipTransitionTime
 		issueDetailsMapByType[issueDetails.IssueType] = append(issueDetailsMapByType[issueDetails.IssueType], issueDetails)
 	}
 
-	if len(notMappedStatus) > 0 {
-		warn("\nThe following status were found but not mapped in board.cfg:\n")
-		for _, status := range notMappedStatus {
-			fmt.Println(status)
-		}
-	}
-	return issueDetailsMapByType
+	return issueDetailsMapByType, notMappedStatus
 }
 
 // Calculates time difference between transitions subtracting weekend days

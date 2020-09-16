@@ -27,7 +27,7 @@ func formatBrDate(date time.Time) string {
 }
 
 func formatBrDateWithTime(date time.Time) string {
-	const brDateFormat = "02/01/2006 15:04"
+	const brDateFormat = "02/01/2006 15:04:05"
 	return date.Format(brDateFormat)
 }
 

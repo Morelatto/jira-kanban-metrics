@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/andygrunwald/go-jira"
+	"io/ioutil"
 	"math"
 	"strings"
 	"time"
@@ -81,4 +83,12 @@ func mergeMaps(map1 map[string][]IssueDetails, map2 map[string][]IssueDetails) m
 
 func getDays(duration time.Duration) int {
 	return int(math.Round(duration.Hours() / 24))
+}
+
+func readResponseBody(resp *jira.Response) string {
+	if resp != nil {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return string(body)
+	}
+	return ""
 }
