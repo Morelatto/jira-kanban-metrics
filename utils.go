@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/andygrunwald/go-jira"
 	"io/ioutil"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -40,13 +41,12 @@ func countWeekendDays(start time.Time, end time.Time) int {
 	return weekendDays
 }
 
-func containsStatus(statuses []string, status string) bool {
-	for _, s := range statuses {
+func containsStatus(statusList []string, status string) bool {
+	for _, s := range statusList {
 		if strings.ToUpper(s) == strings.ToUpper(status) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -74,13 +74,6 @@ func getIssueTypeByStatus(status string) string {
 	}
 }
 
-func mergeMaps(map1 map[string][]IssueDetails, map2 map[string][]IssueDetails) map[string][]IssueDetails {
-	for issueType, issueDetailsArray := range map2 {
-		map1[issueType] = append(map1[issueType], issueDetailsArray...)
-	}
-	return map1
-}
-
 func getDays(duration time.Duration) int {
 	return int(math.Round(duration.Hours() / 24))
 }
@@ -91,4 +84,13 @@ func readResponseBody(resp *jira.Response) string {
 		return string(body)
 	}
 	return ""
+}
+
+func parseTime(timeStr string) time.Time {
+	const layout = "2006-01-02T15:04:05.000-0700"
+	t, err := time.Parse(layout, timeStr)
+	if err != nil {
+		log.Printf("Error parsing date string: %v", err)
+	}
+	return t
 }

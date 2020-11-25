@@ -4,10 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/andygrunwald/go-jira"
-	"io/ioutil"
+	"github.com/zchee/color"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var JiraClient jira.Client
@@ -29,32 +30,20 @@ func authJiraClient() {
 	JiraClient = *client
 }
 
-func getDoneIssuesJqlSearch() string {
-	jqlSearch := fmt.Sprintf("project = '%v' AND issuetype != Epic AND (status CHANGED TO (%v) DURING('%v', '%v'))",
-		BoardCfg.Project,
-		formatColumns(BoardCfg.DoneStatus),
-		formatJiraDate(parseDate(CLParameters.StartDate)),
-		formatJiraDate(parseDate(CLParameters.EndDate)))
-	if CLParameters.Debug {
-		title("WIP/Throughput JQL: %s\n", jqlSearch)
-	}
-	return jqlSearch
-}
+const issuesJql = "project = '%v' AND issuetype != Epic AND status CHANGED DURING('%v', '%v') ORDER BY status"
 
-func getNotDoneIssuesJqlSearch() string {
-	jqlSearch := fmt.Sprintf("project = '%v' AND  issuetype != Epic AND status CHANGED DURING('%v', '%v') AND status NOT IN (%v)",
-		BoardCfg.Project,
-		formatJiraDate(parseDate(CLParameters.StartDate)),
-		formatJiraDate(parseDate(CLParameters.EndDate)),
-		formatColumns(BoardCfg.DoneStatus))
+func getIssuesJqlSearch() string {
+	jqlSearch := fmt.Sprintf(issuesJql, BoardCfg.Project, formatJiraDate(parseDate(CLParameters.StartDate)), formatJiraDate(parseDate(CLParameters.EndDate)))
 	if CLParameters.Debug {
-		title("Not Done JQL: %s\n", jqlSearch)
+		title("JQL: %s\n", jqlSearch)
 	}
 	return jqlSearch
 }
 
 func searchIssues(jql string) []jira.Issue {
-	log.Printf("JQL: %v", jql)
+	if CLParameters.Debug {
+		log.Printf("JQL: %v", jql)
+	}
 	var i = 0
 	var issues []jira.Issue
 	searchOptions := jira.SearchOptions{MaxResults: 100, Expand: "changelog"}
@@ -70,39 +59,99 @@ func searchIssues(jql string) []jira.Issue {
 			break
 		}
 	}
-	log.Printf("Total issues returned: %v", len(issues))
+	if CLParameters.Debug {
+		log.Printf("Total issues returned: %v", len(issues))
+	}
 	return issues
 }
 
-func getCustomFields(issue jira.Issue) []string {
-	var customFields []string
-	if len(BoardCfg.CustomFields) != 0 {
-		for _, custom := range BoardCfg.CustomFields {
-			value := getCustomFieldValue(custom, issue.ID)
-			if value != "" {
-				customFields = append(customFields, value)
+type CustomField interface {
+	Id() string
+	String() string
+	Unmarshall(interface{}) CustomField
+}
+
+type SprintCustomField struct {
+	Name         string
+	State        string
+	StartDate    time.Time
+	EndDate      time.Time
+	CompleteDate time.Time
+}
+
+func (SprintCustomField) Id() string {
+	return "customfield_10021"
+}
+
+func (cf SprintCustomField) String() string {
+	return color.CyanString(cf.Name)
+}
+
+func (SprintCustomField) Unmarshall(data interface{}) CustomField {
+	cf := SprintCustomField{}
+	m := data.(map[string]interface{})
+	if name, ok := m["name"].(string); ok {
+		cf.Name = name
+	}
+	if state, ok := m["state"].(string); ok {
+		cf.State = state
+	}
+	if startDateStr, ok := m["startDate"].(string); ok {
+		if startDate, err := time.Parse(time.RFC3339, startDateStr); err == nil {
+			cf.StartDate = startDate
+		}
+	}
+	if endDateStr, ok := m["endDate"].(string); ok {
+		if endDate, err := time.Parse(time.RFC3339, endDateStr); err == nil {
+			cf.EndDate = endDate
+		}
+	}
+	if completedDateStr, ok := m["endDate"].(string); ok {
+		if completedDate, err := time.Parse(time.RFC3339, completedDateStr); err == nil {
+			cf.CompleteDate = completedDate
+		}
+	}
+	return cf
+}
+
+type FlagCustomField struct {
+	Value string
+}
+
+func (FlagCustomField) Id() string {
+	return "customfield_10035"
+}
+
+func (cf FlagCustomField) String() string {
+	return color.RedString("Flag")
+}
+
+func (FlagCustomField) Unmarshall(data interface{}) CustomField {
+	cf := FlagCustomField{}
+	m := data.(map[string]interface{})
+	if value, ok := m["value"].(string); ok {
+		cf.Value = value
+	}
+	return cf
+}
+
+var supportedCustomFields = []CustomField{SprintCustomField{}, FlagCustomField{}}
+
+func getCustomFields(issue jira.Issue) []CustomField {
+	var customFields []CustomField
+	for name, value := range issue.Fields.Unknowns {
+		for _, supportedCustomField := range supportedCustomFields {
+			if name == supportedCustomField.Id() && value != nil {
+				switch customField := value.(type) {
+				case []interface{}:
+					for _, field := range customField {
+						customFields = append(customFields, supportedCustomField.Unmarshall(field))
+					}
+				case interface{}:
+					customFields = append(customFields, supportedCustomField.Unmarshall(customField))
+				}
 			}
 		}
 	}
 	return customFields
-}
-
-func getCustomFieldValue(customField, issueId string) string {
-	fields, res, err := JiraClient.Issue.GetCustomFields(issueId)
-	if err != nil {
-		warn("Failed to get custom fields for %s\n", issueId)
-		return ""
-	}
-	if res.StatusCode != 200 {
-		fmt.Println("Response Code: " + res.Status)
-		bodyBytes, _ := ioutil.ReadAll(res.Body)
-		fmt.Println("Body: " + string(bodyBytes))
-	} else {
-		for name, value := range fields {
-			if name == customField && value != "<nil>" {
-				return value
-			}
-		}
-	}
-	return ""
 }

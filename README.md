@@ -17,6 +17,7 @@ go build
 ## Usage
 ```
 jira-kanban-metrics <startDate> <endDate> [--debug]
+jira-kanban-metrics <JQL> [--debug]
 jira-kanban-metrics -h | --help
 jira-kanban-metrics --version
 ```
@@ -25,6 +26,7 @@ jira-kanban-metrics --version
 ```
 startDate     Start date in dd/mm/yyyy format.
 endDate       End date in dd/mm/yyyy format.
+JQL           A JQL to use as input for the script.
 ```
 
 ## Options
@@ -41,10 +43,9 @@ endDate       End date in dd/mm/yyyy format.
 "JiraUrl":      "http://jira.intranet/jira",
 "Login":        "",
 "Password":     "",
-"Project":      "PSQUATRO",
-"OpenStatus":   ["BACKLOG", "PRIORIZADA", "OPEN"],
+"Project":      "",
+"OpenStatus":   ["BACKLOG", "OPEN"],
 "WipStatus":    ["IN PROGRESS", "TEST"],
-"IdleStatus":   ["DEV DONE", "TEST DONE", "DEPENDÊNCIA EXTERNA"],
-"DoneStatus":   ["DONE"],
-"CustomFields": []
+"IdleStatus":   ["DEV DONE", "TEST DONE"],
+"DoneStatus":   ["DONE"]
 ```

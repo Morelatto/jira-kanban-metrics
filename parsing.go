@@ -10,7 +10,7 @@ func parseDate(dateStr string) time.Time {
 
 	parsedDate, err := time.Parse(defaultDateFormat, dateStr)
 	if err != nil {
-		panic(err)
+		return time.Time{}
 	}
 
 	return parsedDate
@@ -29,17 +29,4 @@ func formatBrDate(date time.Time) string {
 func formatBrDateWithTime(date time.Time) string {
 	const brDateFormat = "02/01/2006 15:04:05"
 	return date.Format(brDateFormat)
-}
-
-func formatColumns(columns []string) string {
-	str := ""
-
-	for index, col := range columns {
-		str += "'" + col + "'"
-		if index < len(columns)-1 {
-			str += ","
-		}
-	}
-
-	return str
 }
